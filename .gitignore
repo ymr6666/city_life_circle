@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Data files (large, regeneratable)
+*.gpkg
+*.geojson
+*.csv
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.lock
+
+# Cache
+cache/
+
+# Temp / archive
+_archive/
+
+# ArcGIS
+合肥数据预览/
+
+# API keys
+scripts/crawlers/config.py
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
