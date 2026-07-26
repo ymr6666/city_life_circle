@@ -3,25 +3,9 @@ __pycache__/
 *.pyc
 *.pyo
 
-# Data files (large, regeneratable)
-*.gpkg
-*.geojson
-*.csv
-*.shp
-*.shx
-*.dbf
-*.prj
-*.cpg
-*.lock
-
-# Cache
-cache/
-
 # Temp / archive
 _archive/
-
-# ArcGIS
-合肥数据预览/
+_list_data.py
 
 # API keys
 scripts/crawlers/config.py
@@ -32,3 +16,43 @@ scripts/crawlers/config.py
 
 # OS
 Thumbs.db
+
+# Large data files (regeneratable via scripts)
+*.lock
+data/合肥路网/hefei_roads.gpkg
+data/合肥路网/hefei_roads.shp
+data/合肥路网/hefei_roads.shx
+data/合肥路网/hefei_roads.dbf
+data/合肥路网/hefei_roads.prj
+data/合肥路网/hefei_roads.cpg
+data/合肥路网/hefei_roads_nodes.gpkg
+data/合肥路网/hefei_roads_nodes.shp
+data/合肥路网/hefei_roads_nodes.shx
+data/合肥路网/hefei_roads_nodes.dbf
+data/合肥路网/hefei_roads_nodes.prj
+data/合肥路网/hefei_roads_nodes.cpg
+shp/hefei_roads.gpkg
+shp/hefei_roads.shp
+shp/hefei_roads.shx
+shp/hefei_roads.dbf
+shp/hefei_roads.prj
+shp/hefei_roads.cpg
+shp/hefei_roads_nodes.gpkg
+shp/hefei_roads_nodes.shp
+shp/hefei_roads_nodes.shx
+shp/hefei_roads_nodes.dbf
+shp/hefei_roads_nodes.prj
+shp/hefei_roads_nodes.cpg
+shp/snapped_pois.gpkg
+
+# ArcGIS internal
+合肥数据预览/
+*.sr.lock
+*.gdb/
+GpMessages/
+ImportLog/
+Index/
+.backups/
+
+# Cache
+cache/
