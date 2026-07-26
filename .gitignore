@@ -17,32 +17,8 @@ scripts/crawlers/config.py
 # OS
 Thumbs.db
 
-# Large data files (regeneratable via scripts)
+# Large generated files
 *.lock
-data/合肥路网/hefei_roads.gpkg
-data/合肥路网/hefei_roads.shp
-data/合肥路网/hefei_roads.shx
-data/合肥路网/hefei_roads.dbf
-data/合肥路网/hefei_roads.prj
-data/合肥路网/hefei_roads.cpg
-data/合肥路网/hefei_roads_nodes.gpkg
-data/合肥路网/hefei_roads_nodes.shp
-data/合肥路网/hefei_roads_nodes.shx
-data/合肥路网/hefei_roads_nodes.dbf
-data/合肥路网/hefei_roads_nodes.prj
-data/合肥路网/hefei_roads_nodes.cpg
-shp/hefei_roads.gpkg
-shp/hefei_roads.shp
-shp/hefei_roads.shx
-shp/hefei_roads.dbf
-shp/hefei_roads.prj
-shp/hefei_roads.cpg
-shp/hefei_roads_nodes.gpkg
-shp/hefei_roads_nodes.shp
-shp/hefei_roads_nodes.shx
-shp/hefei_roads_nodes.dbf
-shp/hefei_roads_nodes.prj
-shp/hefei_roads_nodes.cpg
 shp/snapped_pois.gpkg
 
 # ArcGIS internal
