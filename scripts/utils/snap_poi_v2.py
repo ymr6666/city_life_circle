@@ -56,7 +56,7 @@ drive_highways = [
 cur.execute("DROP TABLE IF EXISTS tmp_walk_vertices")
 cur.execute("DROP TABLE IF EXISTS tmp_drive_vertices")
 
-# Walk vertices
+# Walk vertices (exclude motorway/trunk + elevated bridge roads)
 placeholders = ','.join(['%s'] * len(walk_highways))
 cur.execute(f"""
     CREATE TEMP TABLE tmp_walk_vertices AS
@@ -64,6 +64,15 @@ cur.execute(f"""
     FROM hefei_roads_vertices_pgr v
     JOIN hefei_roads r ON r.source = v.id OR r.target = v.id
     WHERE r.highway IN ({placeholders})
+      -- 额外防御：排除 bridge=yes 的高架路（行人不可达）
+      AND NOT (
+          r.bridge = 'yes'
+          AND (
+              r.highway IN ('primary', 'primary_link', 'secondary', 'secondary_link')
+              OR r.highway LIKE '%primary%'
+              OR r.highway LIKE '%secondary%'
+          )
+      )
 """, walk_highways)
 cur.execute("CREATE INDEX idx_twv_id ON tmp_walk_vertices(id)")
 cur.execute("CREATE INDEX idx_twv_geom ON tmp_walk_vertices USING GIST(geometry)")
