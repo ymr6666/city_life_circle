@@ -195,7 +195,6 @@ def rebuild_snap(cur, conn):
         """
         total = 0
         for cat, (radius, max_n) in RADIUS_MAP.items():
-            radius_deg = radius / 111000.0
             bbox = f"p.geometry && ST_MakeEnvelope({BBOX[0]},{BBOX[1]},{BBOX[2]},{BBOX[3]}, 4326)"
             if cat == 'hospital':
                 catf = f"p.category='hospital' AND (p.canonical_poi_id=p.id OR p.canonical_poi_id IS NULL) AND {bbox}"
@@ -208,7 +207,7 @@ def rebuild_snap(cur, conn):
                 FROM hefei_poi p
                 CROSS JOIN LATERAL (
                     SELECT id, geometry FROM tmp_poi_vertices
-                    WHERE ST_DWithin(geometry, ({snap_sql}), {radius_deg})
+                    WHERE ST_DWithin(geometry::geography, ({snap_sql})::geography, {radius})
                     ORDER BY ({snap_sql}) <-> geometry LIMIT {max_n}
                 ) v
                 WHERE {catf}

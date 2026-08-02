@@ -43,7 +43,6 @@ cur.execute("""
 conn.commit()
 
 print("Step 3: 每个地铁站吸附最近 3 个步行节点 (300m)")
-radius_deg = 300.0 / 111000.0
 cur.execute(f"""
     INSERT INTO metro_station_road_nodes (station_id, node_id, distance_m)
     SELECT ms.id, v.id,
@@ -51,7 +50,7 @@ cur.execute(f"""
     FROM hefei_metro_stations ms
     CROSS JOIN LATERAL (
         SELECT id, geometry FROM tmp_walk_vertices_metro
-        WHERE ST_DWithin(geometry, ms.geometry, {radius_deg})
+        WHERE ST_DWithin(geometry::geography, ms.geometry::geography, 300)
         ORDER BY ms.geometry <-> geometry LIMIT 3
     ) v
 """)

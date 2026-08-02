@@ -57,7 +57,6 @@ def main():
     conn.commit()
 
     print("Step 3: 吸附 (半径 %dm, 每站 %d 节点)" % (RADIUS_M, MAX_NODES))
-    radius_deg = RADIUS_M / 111000.0
     cur.execute(f"""
         INSERT INTO bus_stop_road_nodes (stop_no, node_id, distance_m)
         SELECT s.stop_no, v.id,
@@ -65,7 +64,7 @@ def main():
         FROM hefei_bus_stops s
         CROSS JOIN LATERAL (
             SELECT id, geometry FROM tmp_walk_vertices_bus
-            WHERE ST_DWithin(geometry, s.geometry, {radius_deg})
+            WHERE ST_DWithin(geometry::geography, s.geometry::geography, {RADIUS_M})
             ORDER BY s.geometry <-> geometry LIMIT {MAX_NODES}
         ) v
         WHERE s.geometry && ST_MakeEnvelope({BBOX[0]},{BBOX[1]},{BBOX[2]},{BBOX[3]}, 4326)

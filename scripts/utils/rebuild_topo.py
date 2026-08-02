@@ -25,6 +25,9 @@ print('创建索引...')
 cur.execute("CREATE INDEX idx_roads_u ON hefei_roads(u)")
 cur.execute("CREATE INDEX idx_roads_v ON hefei_roads(v)")
 cur.execute("CREATE INDEX idx_vertices_osm ON hefei_roads_vertices_pgr(osm_id)")
+# 吸附/可达查询的关键索引: EXISTS(r.source=v.id OR r.target=v.id) 与 KNN
+cur.execute("CREATE INDEX idx_roads_source ON hefei_roads(source)")
+cur.execute("CREATE INDEX idx_roads_target ON hefei_roads(target)")
 conn.commit()
 
 print('关联 source/target...')

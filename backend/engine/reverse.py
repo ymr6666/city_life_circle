@@ -16,6 +16,7 @@
 import json
 
 from services.database import execute_query, execute_one
+from .walk_layer import adaptive_snap
 
 
 def _hull_geojson(node_ids):
@@ -53,11 +54,11 @@ def reverse_reachability(layer, facilities, time_budget_min, snap_radius_m=150):
         edge_sql = layer._edge_sql(swap=swap)
         budget = layer.get_distance_budget(time_budget_min)   # 单模式成本为米
 
-    # 1. 各设施吸附到路网节点
+    # 1. 各设施吸附到路网节点 (自适应半径容错)
     snaps = []
     start_ids = set()
     for f in facilities:
-        cands = layer.snap_origin_multi(f["lat"], f["lng"], snap_radius_m, 3)
+        cands, _ = adaptive_snap(layer, f["lat"], f["lng"], snap_radius_m, 3)
         snaps.append(cands)
         for c in cands:
             start_ids.add(c["id"])
@@ -79,7 +80,7 @@ def reverse_reachability(layer, facilities, time_budget_min, snap_radius_m=150):
             continue
         fids = [c["id"] for c in cands]
         rows = execute_query("""
-            SELECT dd.node, MIN(dd.agg_cost) AS agg_cost, v.x, v.y
+            SELECT dd.node, MIN(dd.agg_cost) AS agg_cost, v.y AS lng, v.x AS lat
             FROM pgr_drivingDistance(%s, %s, %s, directed := %s) dd
             JOIN hefei_roads_vertices_pgr v ON v.id = dd.node
             WHERE dd.agg_cost <= %s

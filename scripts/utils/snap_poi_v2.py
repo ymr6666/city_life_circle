@@ -270,7 +270,6 @@ snap_sql = """
 
 def snap_pois(category, mode, vertex_table, radius_m, max_nodes):
     """挂接一个类别到一个模式的顶点表"""
-    radius_deg = radius_m / 111000.0
     t0 = time.time()
 
     # 医院只挂接 canonical (canonical_poi_id = id 或 canonical_poi_id IS NULL)
@@ -291,12 +290,12 @@ def snap_pois(category, mode, vertex_table, radius_m, max_nodes):
         FROM hefei_poi p
         CROSS JOIN LATERAL (
             SELECT id, geometry FROM {vertex_table}
-            WHERE ST_DWithin(geometry, ({snap_sql}), %s)
+            WHERE ST_DWithin(geometry::geography, ({snap_sql})::geography, %s)
             ORDER BY ({snap_sql}) <-> geometry
             LIMIT %s
         ) v
         WHERE {cat_filter}
-    """, (mode, radius_deg, max_nodes))
+    """, (mode, radius_m, max_nodes))
 
     cur.execute("""
         SELECT count(*) FROM poi_road_nodes pn

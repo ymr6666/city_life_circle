@@ -25,6 +25,24 @@
 from .base_layer import TransportLayer
 from services.database import execute_query, execute_one
 
+# 自适应吸附的半径阶梯: 默认半径找不到时逐级放大 (点可能在校区/公园内部或坐标偏移)
+ADAPTIVE_RADII = (150, 300, 500, 800)
+
+
+def adaptive_snap(layer, lat: float, lng: float, base_radius_m: float = 150,
+                  max_nodes: int = 3, max_radius_m: float = 800):
+    """多级半径吸附容错。返回 (candidates, 实际使用的半径)。
+    在稀疏路网区域(校区/公园内部)或坐标有偏移时, 自动放大吸附半径避免直接失败。"""
+    radii = [base_radius_m]
+    for r in ADAPTIVE_RADII:
+        if r > base_radius_m and r <= max_radius_m:
+            radii.append(r)
+    for r in radii:
+        cands = layer.snap_origin_multi(lat, lng, r, max_nodes)
+        if cands:
+            return cands, r
+    return [], base_radius_m
+
 
 class WalkLayer(TransportLayer):
     speed_kmh = 5.0
@@ -48,10 +66,12 @@ class WalkLayer(TransportLayer):
         """
 
     # ── 坐标吸附: 找到最近的可走路网节点 ────────────────────────
+    # 注意: hefei_roads_vertices_pgr 列 x=纬度, y=经度 (rebuild_topo 的 y AS x, x AS y 所致),
+    #       故 SELECT 用 v.y AS lng, v.x AS lat 保证输出 lng/lat 正确
     def snap_origin(self, lat: float, lng: float) -> dict:
         """单节点吸附: KNN 查最近 1 个可走节点"""
         row = execute_one("""
-            SELECT v.id, v.x, v.y,
+            SELECT v.id, v.y AS lng, v.x AS lat,
                    ST_Distance(
                        ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography,
                        v.geometry::geography
@@ -70,10 +90,10 @@ class WalkLayer(TransportLayer):
     def snap_origin_multi(self, lat: float, lng: float, radius_m: float = 150, max_nodes: int = 3) -> list:
         """多节点吸附: 在指定半径内取最近的 N 个可走节点
         用于坐标精度不足时 (如 2 位小数 ≈ ±500m 误差) 的容错处理
-        EXISTS 子查询代替 JOIN 避免同一节点因关联多条边而重复出现"""
-        radius_deg = radius_m / 111000.0
+        EXISTS 子查询代替 JOIN 避免同一节点因关联多条边而重复出现
+        注意: ST_DWithin 用 geography(米) 保证圆半径不受纬度经度换算影响"""
         rows = execute_query("""
-            SELECT v.id, v.x, v.y,
+            SELECT v.id, v.y AS lng, v.x AS lat,
                    ST_Distance(
                        ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography,
                        v.geometry::geography
@@ -84,10 +104,11 @@ class WalkLayer(TransportLayer):
                 WHERE (r.source = v.id OR r.target = v.id)
                   AND r.{ok_column}
             )
-              AND ST_DWithin(v.geometry, ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s)
+              AND ST_DWithin(v.geometry::geography,
+                             ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography, %s)
             ORDER BY ST_SetSRID(ST_MakePoint(%s, %s), 4326) <-> v.geometry
             LIMIT %s
-        """.format(ok_column=self.ok_column), (lng, lat, lng, lat, radius_deg, lng, lat, max_nodes))
+        """.format(ok_column=self.ok_column), (lng, lat, lng, lat, radius_m, lng, lat, max_nodes))
         return [{"id": r[0], "lng": r[1], "lat": r[2], "distance_m": float(r[3])} for r in rows]
 
     # ── 时间→距离换算 ──────────────────────────────────────────
@@ -114,7 +135,7 @@ class WalkLayer(TransportLayer):
         """同上, 但 JOIN hefei_roads_vertices_pgr 获取每个节点的经纬度"""
         distance_budget_m = self.get_distance_budget(time_budget_min)
         rows = execute_query("""
-            SELECT dd.node, dd.agg_cost, v.x, v.y
+            SELECT dd.node, dd.agg_cost, v.y AS lng, v.x AS lat
             FROM pgr_drivingDistance(%s, %s, %s, directed := %s) dd
             JOIN hefei_roads_vertices_pgr v ON v.id = dd.node
             WHERE dd.agg_cost <= %s
@@ -167,13 +188,13 @@ class WalkLayer(TransportLayer):
         """
         distance_budget_m = self.get_distance_budget(time_budget_min)
 
-        candidates = self.snap_origin_multi(lat, lng, snap_radius_m, snap_max_nodes)
+        candidates, snap_radius_used = adaptive_snap(self, lat, lng, snap_radius_m, snap_max_nodes)
         if not candidates:
             return None
 
         start_ids = [c['id'] for c in candidates]
         rows = execute_query("""
-            SELECT dd.node, MIN(dd.agg_cost) as agg_cost, v.x, v.y
+            SELECT dd.node, MIN(dd.agg_cost) as agg_cost, v.y AS lng, v.x AS lat
             FROM pgr_drivingDistance(%s, %s, %s, directed := %s) dd
             JOIN hefei_roads_vertices_pgr v ON v.id = dd.node
             WHERE dd.agg_cost <= %s
@@ -189,6 +210,7 @@ class WalkLayer(TransportLayer):
         return {
             "origin": {"lat": lat, "lng": lng},
             "snap_candidates": candidates,
+            "snap_radius_m": snap_radius_used,
             "time_budget_min": time_budget_min,
             "distance_budget_m": round(distance_budget_m, 1),
             "reachable_nodes_count": len(nodes),

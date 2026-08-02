@@ -22,7 +22,7 @@
 + 出站后再可达的节点。公交数据未就绪时 raise ValueError 给出明确提示。
 """
 from .base_layer import TransportLayer
-from .walk_layer import WalkLayer
+from .walk_layer import WalkLayer, adaptive_snap
 from .cycle_layer import CycleLayer
 from .drive_layer import DriveLayer
 from services.database import execute_query, execute_one
@@ -222,7 +222,7 @@ class TransitLayer(TransportLayer):
             return []
         phs = ','.join(['%s'] * len(road))
         rows = execute_query(
-            f"SELECT id, x, y FROM hefei_roads_vertices_pgr WHERE id IN ({phs})",
+            f"SELECT id, y AS lng, x AS lat FROM hefei_roads_vertices_pgr WHERE id IN ({phs})",
             tuple(road.keys()))
         coord = {r[0]: (float(r[1]), float(r[2])) for r in rows}
         return [{"node": nid, "agg_cost": c,
@@ -266,7 +266,7 @@ class TransitLayer(TransportLayer):
         """1. 吸附起点 → 2. 耦合图单次 Dijkstra → 3. 按节点偏移分离三类结果 → 4. POI 反查"""
         self._check_data()
 
-        candidates = self.snap_origin_multi(lat, lng, snap_radius_m, snap_max_nodes)
+        candidates, snap_radius_used = adaptive_snap(self, lat, lng, snap_radius_m, snap_max_nodes)
         if not candidates:
             return None
 
@@ -306,6 +306,7 @@ class TransitLayer(TransportLayer):
         result = {
             "origin": {"lat": lat, "lng": lng},
             "snap_candidates": candidates,
+            "snap_radius_m": snap_radius_used,
             "time_budget_min": time_budget_min,
             "reachable_road_nodes_count": len(road_nodes),
             "reachable_road_nodes": road_nodes,
