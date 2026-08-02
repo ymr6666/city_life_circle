@@ -1,8 +1,42 @@
 from flask import Blueprint, request, jsonify
 from engine.factory import build_layer
+from engine.reverse import reverse_reachability
 from collections import defaultdict
 
 isochrone_bp = Blueprint('isochrone', __name__)
+
+
+@isochrone_bp.route('/api/reverse-isochrone', methods=['POST'])
+def reverse_isochrone():
+    """反算: 设施坐标 → 能到达它的起点覆盖范围; 多设施交集 = 最优选址
+    入参: { facilities: [{lat,lng},...], mode, time_budget_min, snap_radius_m }"""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "missing JSON body"}), 400
+
+    facilities = data.get('facilities')
+    mode = data.get('mode', 'walk')
+    time_budget_min = data.get('time_budget_min', 15)
+    snap_radius_m = data.get('snap_radius_m', 150)
+
+    if not isinstance(facilities, list) or not facilities:
+        return jsonify({"error": "facilities (list of {lat,lng}) required"}), 400
+    for f in facilities:
+        if not isinstance(f, dict) or f.get('lat') is None or f.get('lng') is None:
+            return jsonify({"error": "each facility needs lat and lng"}), 400
+
+    try:
+        layer = build_layer(mode)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    result = reverse_reachability(layer, facilities, time_budget_min, snap_radius_m)
+    if not result:
+        return jsonify({"error": "no accessible road node near facilities"}), 404
+
+    result["mode"] = mode
+    result["time_budget_min"] = time_budget_min
+    return jsonify(result)
 
 
 @isochrone_bp.route('/api/isochrone', methods=['POST'])

@@ -38,10 +38,12 @@ class WalkLayer(TransportLayer):
     poi_mode = "walk"
 
     # ── 边集 SQL: pgRouting 在每个查询里动态过滤道路类型 ────────
-    def _edge_sql(self) -> str:
-        """返回该模式可走边的 (id, source, target, cost, reverse_cost) 查询"""
+    def _edge_sql(self, swap: bool = False) -> str:
+        """返回该模式可走边的 (id, source, target, cost, reverse_cost) 查询
+        swap=True 时交换 source/target → 反算 (求"哪些起点能到达目标")"""
+        s, t = ("target", "source") if swap else ("source", "target")
         return f"""
-            SELECT id, source, target, cost, reverse_cost FROM hefei_roads
+            SELECT id, {s} AS source, {t} AS target, cost, reverse_cost FROM hefei_roads
             WHERE cost > 0 AND {self.ok_column}
         """
 

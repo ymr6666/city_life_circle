@@ -77,6 +77,11 @@ class TransitLayer(TransportLayer):
             return DriveLayer()
         return WalkLayer()
 
+    @property
+    def directed(self) -> bool:
+        """道路模式为 walk 时方向无关; cycle/drive 需尊重单行道"""
+        return self.road_mode != "walk"
+
     # ── 数据就绪检查 ─────────────────────────────────────────
     def _check_data(self):
         missing = []
@@ -94,20 +99,21 @@ class TransitLayer(TransportLayer):
                 "请先完成: python crawl_bus.py --load 然后 python snap_bus_stops.py")
 
     # ── 边集 SQL ─────────────────────────────────────────────
-    def _road_edge_sql(self) -> str:
-        """道路边: 长度转分钟 (cycle/drive 尊重单行道)"""
+    def _road_edge_sql(self, swap: bool = False) -> str:
+        """道路边: 长度转分钟 (cycle/drive 尊重单行道); swap 反算用"""
         speed_mh = ROAD_SPEED_KMH[self.road_mode] * 1000.0
         ok_col = f"{self.road_mode}_ok"
+        s, t = ("target", "source") if swap else ("source", "target")
         if self.road_mode == "walk":
             return f"""
-                SELECT id, source, target,
+                SELECT id, {s} AS source, {t} AS target,
                        cost * 60.0 / {speed_mh} AS cost,
                        reverse_cost * 60.0 / {speed_mh} AS reverse_cost
                 FROM hefei_roads
                 WHERE cost > 0 AND {ok_col}
             """
         return f"""
-            SELECT id, source, target,
+            SELECT id, {s} AS source, {t} AS target,
                    cost * 60.0 / {speed_mh} AS cost,
                    CASE WHEN oneway LIKE '%True%' AND COALESCE(reversed,'') != 'True'
                         THEN -1 ELSE reverse_cost * 60.0 / {speed_mh} END AS reverse_cost
@@ -115,31 +121,39 @@ class TransitLayer(TransportLayer):
             WHERE cost > 0 AND {ok_col}
         """
 
-    def _metro_edge_sql(self) -> str:
+    def _metro_edge_sql(self, swap: bool = False) -> str:
+        src = f"{METRO_OFFSET} + station_to" if swap else f"{METRO_OFFSET} + station_from"
+        tgt = f"{METRO_OFFSET} + station_from" if swap else f"{METRO_OFFSET} + station_to"
         return f"""
             SELECT {_METRO_EDGE_OFF} + id AS id,
-                   {METRO_OFFSET} + station_from AS source,
-                   {METRO_OFFSET} + station_to AS target,
+                   {src} AS source,
+                   {tgt} AS target,
                    time_min, time_min
             FROM hefei_metro_edges
         """
 
-    def _metro_transfer_sql(self) -> str:
+    def _metro_transfer_sql(self, swap: bool = False) -> str:
+        src = f"{METRO_OFFSET} + station_id" if swap else "node_id"
+        tgt = "node_id" if swap else f"{METRO_OFFSET} + station_id"
         return f"""
             SELECT {_METRO_XFER_OFF} + id AS id,
-                   node_id, {METRO_OFFSET} + station_id, 0.0, 0.0
+                   {src} AS source, {tgt} AS target, 0.0, 0.0
             FROM metro_station_road_nodes
         """
 
-    def _bus_edge_sql(self) -> str:
+    def _bus_edge_sql(self, swap: bool = False) -> str:
         """公交边: 同一线路同一方向相邻站连线
         时间优先用 route_pos_m 差 (沿线路里程), 缺失时用几何直线距离 / 公交速度
         注意: UNION ALL 中不能直接跟 WITH, 故将 CTE 包在子查询内"""
         bus_speed_mh = BUS_SPEED_KMH * 1000.0
+        if swap:
+            src_expr, tgt_expr = "be.b_no", "be.a_no"
+        else:
+            src_expr, tgt_expr = "be.a_no", "be.b_no"
         return f"""
             SELECT {_BUS_EDGE_OFF} + ROW_NUMBER() OVER (ORDER BY be.line_id) AS id,
-                   {BUS_OFFSET} + be.a_no AS source,
-                   {BUS_OFFSET} + be.b_no AS target,
+                   {BUS_OFFSET} + {src_expr} AS source,
+                   {BUS_OFFSET} + {tgt_expr} AS target,
                    be.dist_m * 60.0 / {bus_speed_mh} AS cost,
                    be.dist_m * 60.0 / {bus_speed_mh} AS reverse_cost
             FROM (
@@ -168,19 +182,21 @@ class TransitLayer(TransportLayer):
             ) AS be
         """
 
-    def _bus_transfer_sql(self) -> str:
+    def _bus_transfer_sql(self, swap: bool = False) -> str:
+        src = f"{BUS_OFFSET} + stop_no" if swap else "node_id"
+        tgt = "node_id" if swap else f"{BUS_OFFSET} + stop_no"
         return f"""
             SELECT {_BUS_XFER_OFF} + id AS id,
-                   node_id, {BUS_OFFSET} + stop_no, 0.0, 0.0
+                   {src} AS source, {tgt} AS target, 0.0, 0.0
             FROM bus_stop_road_nodes
         """
 
-    def _build_combined_edge_sql(self) -> str:
-        parts = [self._road_edge_sql()]
+    def _build_combined_edge_sql(self, swap: bool = False) -> str:
+        parts = [self._road_edge_sql(swap)]
         if "metro" in self.transit_modes:
-            parts += [self._metro_edge_sql(), self._metro_transfer_sql()]
+            parts += [self._metro_edge_sql(swap), self._metro_transfer_sql(swap)]
         if "bus" in self.transit_modes:
-            parts += [self._bus_edge_sql(), self._bus_transfer_sql()]
+            parts += [self._bus_edge_sql(swap), self._bus_transfer_sql(swap)]
         return "\nUNION ALL\n".join(parts)
 
     # ── 基础接口 (委托道路层) ────────────────────────────────

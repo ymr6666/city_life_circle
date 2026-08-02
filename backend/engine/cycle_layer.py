@@ -24,10 +24,12 @@ class CycleLayer(WalkLayer):
     directed = True
     poi_mode = "walk"  # 复用步行 POI 挂接 (骑行网络 ⊂ 步行网络)
 
-    def _edge_sql(self) -> str:
-        """骑行边: 尊重单行道, oneway 路段禁逆行"""
+    def _edge_sql(self, swap: bool = False) -> str:
+        """骑行边: 尊重单行道, oneway 路段禁逆行
+        swap=True 时交换 source/target (反算用)"""
+        s, t = ("target", "source") if swap else ("source", "target")
         return f"""
-            SELECT id, source, target, cost,
+            SELECT id, {s} AS source, {t} AS target, cost,
                    CASE WHEN oneway LIKE '%True%' AND COALESCE(reversed,'') != 'True'
                         THEN -1 ELSE reverse_cost END AS reverse_cost
             FROM hefei_roads
