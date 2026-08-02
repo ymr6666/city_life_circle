@@ -32,3 +32,6 @@ Index/
 
 # Cache
 cache/
+
+# Database / data backups
+backups/
