@@ -132,31 +132,40 @@ class TransitLayer(TransportLayer):
         """
 
     def _bus_edge_sql(self) -> str:
-        """公交边: 同一线路相邻站连线, 时间 = 直线距离 / 公交速度"""
+        """公交边: 同一线路同一方向相邻站连线
+        时间优先用 route_pos_m 差 (沿线路里程), 缺失时用几何直线距离 / 公交速度
+        注意: UNION ALL 中不能直接跟 WITH, 故将 CTE 包在子查询内"""
         bus_speed_mh = BUS_SPEED_KMH * 1000.0
         return f"""
-            WITH ordered AS (
-                SELECT ls.line_id, s.stop_no,
-                       ST_X(s.geometry) AS x, ST_Y(s.geometry) AS y,
-                       ROW_NUMBER() OVER (PARTITION BY ls.line_id ORDER BY ls.sequence) AS rn
-                FROM hefei_bus_line_stops ls
-                JOIN hefei_bus_stops s ON s.id = ls.stop_id
-            ), pairs AS (
-                SELECT a.line_id, a.stop_no AS a_no, b.stop_no AS b_no,
-                       a.x AS ax, a.y AS ay, b.x AS bx, b.y AS by
-                FROM ordered a
-                JOIN ordered b ON a.line_id = b.line_id AND b.rn = a.rn + 1
-            )
-            SELECT {_BUS_EDGE_OFF} + ROW_NUMBER() OVER (ORDER BY pairs.line_id) AS id,
-                   {BUS_OFFSET} + a_no AS source,
-                   {BUS_OFFSET} + b_no AS target,
-                   ST_Distance(ST_SetSRID(ST_MakePoint(ax, ay), 4326)::geography,
-                               ST_SetSRID(ST_MakePoint(bx, by), 4326)::geography)
-                     * 60.0 / {bus_speed_mh} AS cost,
-                   ST_Distance(ST_SetSRID(ST_MakePoint(ax, ay), 4326)::geography,
-                               ST_SetSRID(ST_MakePoint(bx, by), 4326)::geography)
-                     * 60.0 / {bus_speed_mh} AS reverse_cost
-            FROM pairs
+            SELECT {_BUS_EDGE_OFF} + ROW_NUMBER() OVER (ORDER BY be.line_id) AS id,
+                   {BUS_OFFSET} + be.a_no AS source,
+                   {BUS_OFFSET} + be.b_no AS target,
+                   be.dist_m * 60.0 / {bus_speed_mh} AS cost,
+                   be.dist_m * 60.0 / {bus_speed_mh} AS reverse_cost
+            FROM (
+                WITH ordered AS (
+                    SELECT ls.line_id, ls.direction, s.stop_no, ls.route_pos_m,
+                           ST_X(s.geometry) AS x, ST_Y(s.geometry) AS y,
+                           ROW_NUMBER() OVER (PARTITION BY ls.line_id, ls.direction
+                                              ORDER BY ls.sequence) AS rn
+                    FROM hefei_bus_line_stops ls
+                    JOIN hefei_bus_stops s ON s.id = ls.stop_id
+                ), pairs AS (
+                    SELECT a.line_id, a.stop_no AS a_no, b.stop_no AS b_no,
+                           a.x AS ax, a.y AS ay, b.x AS bx, b.y AS by,
+                           abs(COALESCE(a.route_pos_m, 0) - COALESCE(b.route_pos_m, 0)) AS dpos
+                    FROM ordered a
+                    JOIN ordered b ON a.line_id = b.line_id AND a.direction = b.direction
+                                  AND b.rn = a.rn + 1
+                )
+                SELECT p.line_id, p.a_no, p.b_no,
+                       CASE WHEN p.dpos > 0
+                            THEN p.dpos
+                            ELSE ST_Distance(ST_SetSRID(ST_MakePoint(p.ax, p.ay), 4326)::geography,
+                                             ST_SetSRID(ST_MakePoint(p.bx, p.by), 4326)::geography)
+                       END AS dist_m
+                FROM pairs p
+            ) AS be
         """
 
     def _bus_transfer_sql(self) -> str:
