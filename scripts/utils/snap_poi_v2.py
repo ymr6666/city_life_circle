@@ -272,30 +272,30 @@ def snap_pois(category, mode, vertex_table, radius_m, max_nodes):
     """挂接一个类别到一个模式的顶点表"""
     t0 = time.time()
 
-    # 医院只挂接 canonical (canonical_poi_id = id 或 canonical_poi_id IS NULL)
+    # 所有 POI (含医院科室/楼宇) 独立挂接, 不做 canonical 过滤
     # 只挂接合肥 bbox 内的 POI
     bbox_filter = "p.geometry && ST_MakeEnvelope(117.07, 31.68, 117.50, 32.07, 4326)"
-    if category == 'hospital':
-        cat_filter = f"p.category = 'hospital' AND (p.canonical_poi_id = p.id OR p.canonical_poi_id IS NULL) AND {bbox_filter}"
-    else:
-        cat_filter = f"p.category = '{category}' AND {bbox_filter}"
+    cat_filter = f"p.category = '{category}' AND {bbox_filter}"
 
     cur.execute(f"""
         INSERT INTO poi_road_nodes (poi_id, node_id, mode, distance_m)
-        SELECT p.id, v.id, %s,
-               ST_Distance(
-                   ({snap_sql})::geography,
-                   v.geometry::geography
-               )
-        FROM hefei_poi p
-        CROSS JOIN LATERAL (
-            SELECT id, geometry FROM {vertex_table}
-            WHERE ST_DWithin(geometry::geography, ({snap_sql})::geography, %s)
-            ORDER BY ({snap_sql}) <-> geometry
-            LIMIT %s
-        ) v
-        WHERE {cat_filter}
-    """, (mode, radius_m, max_nodes))
+        SELECT t.poi_id, t.node_id, %s, t.distance_m
+        FROM (
+            SELECT p.id AS poi_id, v.id AS node_id,
+                   ST_Distance(({snap_sql})::geography, v.geometry::geography) AS distance_m,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY p.id ORDER BY ({snap_sql}) <-> v.geometry
+                   ) AS rn
+            FROM hefei_poi p
+            CROSS JOIN LATERAL (
+                SELECT id, geometry FROM {vertex_table}
+                ORDER BY ({snap_sql}) <-> geometry
+                LIMIT {max_nodes * 3}
+            ) v
+            WHERE {cat_filter}
+        ) t
+        WHERE t.rn <= {max_nodes} AND t.distance_m <= {radius_m}
+    """, (mode,))
 
     cur.execute("""
         SELECT count(*) FROM poi_road_nodes pn
@@ -342,10 +342,6 @@ for mode, vertex_table in [('walk', 'tmp_walk_vertices'), ('drive', 'tmp_drive_v
         WHERE p.id NOT IN (
             SELECT DISTINCT poi_id FROM poi_road_nodes WHERE mode = %s
         )
-        -- 非代表医院先不挂，等 copy 阶段
-        AND NOT (p.category = 'hospital'
-                 AND p.canonical_poi_id IS NOT NULL
-                 AND p.canonical_poi_id != p.id)
         -- 只挂接合肥 bbox 内的 POI
         AND p.geometry && ST_MakeEnvelope(117.07, 31.68, 117.50, 32.07, 4326)
     """, (mode, mode))
@@ -355,23 +351,11 @@ for mode, vertex_table in [('walk', 'tmp_walk_vertices'), ('drive', 'tmp_drive_v
 # ══════════════════════════════════════════════
 # STEP 5: 非代表医院复制代表的挂接记录
 # ══════════════════════════════════════════════
+# 已废弃: 不再做 canonical 复制。所有 POI (含医院科室/楼宇) 独立挂接,
+# 引擎按"可达哪个楼宇"保留粒度; 展示去重由 hefei_poi.facility_id 负责
+# (scripts/utils/group_poi_facilities.py)。
 
-print("\nStep 5: copying snap points for non-canonical hospitals...")
-
-cur.execute("""
-    INSERT INTO poi_road_nodes (poi_id, node_id, mode, distance_m)
-    SELECT h.id, pn.node_id, pn.mode, pn.distance_m
-    FROM hefei_poi h
-    JOIN poi_road_nodes pn ON pn.poi_id = h.canonical_poi_id
-    WHERE h.category = 'hospital'
-      AND h.canonical_poi_id IS NOT NULL
-      AND h.canonical_poi_id != h.id
-      AND NOT EXISTS (
-          SELECT 1 FROM poi_road_nodes pn2
-          WHERE pn2.poi_id = h.id
-      )
-""")
-print(f"  copied to {cur.rowcount} non-canonical hospital POIs")
+print("\nStep 5: skipped (canonical copy 已废弃, 见 facility_id)")
 conn.commit()
 
 # ══════════════════════════════════════════════

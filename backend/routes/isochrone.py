@@ -69,19 +69,40 @@ def isochrone():
         return jsonify({"error": "no accessible road node near origin"}), 404
 
     pois_by_category = defaultdict(list)
+    facilities = defaultdict(dict)   # category -> {facility_id: {...}}
     for poi in result['pois']:
-        pois_by_category[poi['category']].append({
+        item = {
             "id": poi['id'],
             "name": poi['name'],
             "sub_category": poi['sub_category'],
             "lng": poi['lng'],
             "lat": poi['lat'],
             "distance_m": poi['distance_m'],
+        }
+        pois_by_category[poi['category']].append(item)
+
+        fid = poi['facility_id']
+        fac = facilities[poi['category']].setdefault(fid, {
+            "name": poi['facility_name'],
+            "sub_category": poi['fac_sub_category'],
+            "lng": poi['fac_lng'],
+            "lat": poi['fac_lat'],
+            "count": 0,
+            "items": [],
         })
+        fac["count"] += 1
+        fac["items"].append(item)
 
     category_stats = {}
     for cat, items in pois_by_category.items():
         category_stats[cat] = {"count": len(items), "items": items}
+
+    facilities_by_category = {}
+    for cat, fac_map in facilities.items():
+        facilities_by_category[cat] = {
+            "count": len(fac_map),
+            "items": sorted(fac_map.values(), key=lambda f: -f['count']),
+        }
 
     response = {
         "mode": mode,
@@ -89,7 +110,9 @@ def isochrone():
         "origin": {"lat": lat, "lng": lng},
         "start_node": result['snap_candidates'][0],
         "reachable_pois_count": len(result['pois']),
+        "reachable_facilities_count": sum(v['count'] for v in facilities_by_category.values()),
         "pois_by_category": category_stats,
+        "facilities_by_category": facilities_by_category,
     }
 
     # 单道路模式 (walk/cycle/drive)

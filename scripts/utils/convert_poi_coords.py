@@ -38,6 +38,8 @@ RADIUS_MAP = {
     'school_senior': (80, 3), 'supermarket': (50, 2), 'market_food': (50, 2),
     'kindergarten': (50, 2), 'street_commercial': (30, 1),
     'street_pedestrian': (30, 1),
+    'pharmacy': (50, 2),   # 药店: 临街店面
+    'sports': (150, 5),    # 运动场馆: 多入口
 }
 BBOX = (117.07, 31.68, 117.50, 32.07)
 
@@ -196,21 +198,26 @@ def rebuild_snap(cur, conn):
         total = 0
         for cat, (radius, max_n) in RADIUS_MAP.items():
             bbox = f"p.geometry && ST_MakeEnvelope({BBOX[0]},{BBOX[1]},{BBOX[2]},{BBOX[3]}, 4326)"
-            if cat == 'hospital':
-                catf = f"p.category='hospital' AND (p.canonical_poi_id=p.id OR p.canonical_poi_id IS NULL) AND {bbox}"
-            else:
-                catf = f"p.category='{cat}' AND {bbox}"
+            # 所有 POI (含医院科室/楼宇) 独立挂接, 不做 canonical 复制:
+            # 引擎粒度按"可达哪个楼宇/入口"保留, 展示去重由 facility_id 负责
+            catf = f"p.category='{cat}' AND {bbox}"
             cur.execute(f"""
                 INSERT INTO poi_road_nodes (poi_id, node_id, mode, distance_m)
-                SELECT p.id, v.id, '{mode}',
-                       ST_Distance(({snap_sql})::geography, v.geometry::geography)
-                FROM hefei_poi p
-                CROSS JOIN LATERAL (
-                    SELECT id, geometry FROM tmp_poi_vertices
-                    WHERE ST_DWithin(geometry::geography, ({snap_sql})::geography, {radius})
-                    ORDER BY ({snap_sql}) <-> geometry LIMIT {max_n}
-                ) v
-                WHERE {catf}
+                SELECT t.poi_id, t.node_id, '{mode}', t.distance_m
+                FROM (
+                    SELECT p.id AS poi_id, v.id AS node_id,
+                           ST_Distance(({snap_sql})::geography, v.geometry::geography) AS distance_m,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY p.id ORDER BY ({snap_sql}) <-> v.geometry
+                           ) AS rn
+                    FROM hefei_poi p
+                    CROSS JOIN LATERAL (
+                        SELECT id, geometry FROM tmp_poi_vertices
+                        ORDER BY ({snap_sql}) <-> geometry LIMIT {max_n * 3}
+                    ) v
+                    WHERE {catf}
+                ) t
+                WHERE t.rn <= {max_n} AND t.distance_m <= {radius}
             """)
             total += cur.rowcount
         # 兜底: 未挂接 POI → 最近 1 节点
@@ -224,18 +231,7 @@ def rebuild_snap(cur, conn):
                 ORDER BY ({snap_sql}) <-> geometry LIMIT 1
             ) v
             WHERE p.id NOT IN (SELECT DISTINCT poi_id FROM poi_road_nodes WHERE mode = %s)
-              AND NOT (p.category='hospital' AND p.canonical_poi_id IS NOT NULL
-                       AND p.canonical_poi_id != p.id)
               AND p.geometry && ST_MakeEnvelope({BBOX[0]},{BBOX[1]},{BBOX[2]},{BBOX[3]}, 4326)
-        """, (mode,))
-        # 非代表医院复制代表的挂接
-        cur.execute("""
-            INSERT INTO poi_road_nodes (poi_id, node_id, mode, distance_m)
-            SELECT h.id, pn.node_id, pn.mode, pn.distance_m
-            FROM hefei_poi h JOIN poi_road_nodes pn ON pn.poi_id = h.canonical_poi_id
-            WHERE h.category='hospital' AND h.canonical_poi_id IS NOT NULL
-              AND h.canonical_poi_id != h.id
-              AND NOT EXISTS (SELECT 1 FROM poi_road_nodes pn2 WHERE pn2.poi_id=h.id AND pn2.mode=%s)
         """, (mode,))
         conn.commit()
         cur.execute("SELECT count(*), count(DISTINCT poi_id) FROM poi_road_nodes WHERE mode=%s", (mode,))

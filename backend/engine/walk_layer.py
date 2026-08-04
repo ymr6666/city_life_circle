@@ -156,9 +156,15 @@ class WalkLayer(TransportLayer):
                    p.id, p.name, p.category, p.sub_category,
                    p.address, p.opentime_today, p.rating, p.cost,
                    pn.node_id, pn.distance_m,
-                   ST_X(p.geometry) as lng, ST_Y(p.geometry) as lat
+                   ST_X(p.geometry) as lng, ST_Y(p.geometry) as lat,
+                   COALESCE(p.facility_id, p.id) as facility_id,
+                   COALESCE(p.facility_name, p.name) as facility_name,
+                   ST_X(COALESCE(f.geometry, p.geometry)) as fac_lng,
+                   ST_Y(COALESCE(f.geometry, p.geometry)) as fac_lat,
+                   COALESCE(f.sub_category, p.sub_category) as fac_sub_category
             FROM poi_road_nodes pn
             JOIN hefei_poi p ON p.id = pn.poi_id
+            LEFT JOIN hefei_poi f ON f.id = p.facility_id
             WHERE pn.mode = %s
               AND pn.node_id IN ({node_id_placeholders})
             ORDER BY p.id, pn.distance_m ASC
@@ -167,7 +173,10 @@ class WalkLayer(TransportLayer):
             "id": r[0], "name": r[1], "category": r[2], "sub_category": r[3],
             "address": r[4], "opentime_today": r[5], "rating": r[6], "cost": r[7],
             "node_id": r[8], "distance_m": float(r[9]),
-            "lng": float(r[10]), "lat": float(r[11])
+            "lng": float(r[10]), "lat": float(r[11]),
+            "facility_id": r[12], "facility_name": r[13],
+            "fac_lng": float(r[14]), "fac_lat": float(r[15]),
+            "fac_sub_category": r[16],
         } for r in rows]
 
     # ── 一体化: 多起点吸附 + Dijkstra + POI 查询 ──────────────────

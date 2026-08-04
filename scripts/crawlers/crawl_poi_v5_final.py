@@ -243,23 +243,34 @@ def build_grid():
 
 
 # ==================== MAIN ====================
-def run():
+def run(only=None):
     global request_count
     start = time.time()
 
+    grid_keys = list(POI_CATEGORIES_GRID.keys())
+    city_keys = list(POI_CATEGORIES_CITY.keys())
+    if only:
+        grid_keys = [k for k in grid_keys if k in only]
+        city_keys = [k for k in city_keys if k in only]
+        if not grid_keys and not city_keys:
+            print(f"未知分类 {only}, 可选: {list(POI_CATEGORIES_GRID) + list(POI_CATEGORIES_CITY)}")
+            return
+
     print(f"Bbox: {HEFEI_BOUNDS['bbox']}, grid_step: {HEFEI_BOUNDS['grid_step']}")
-    print(f"Grid categories: {len(POI_CATEGORIES_GRID)}, City categories: {len(POI_CATEGORIES_CITY)}")
+    print(f"Grid categories: {len(grid_keys)}, City categories: {len(city_keys)}")
+    if only:
+        print(f"仅爬取: {only}")
     print(f"Grid cells: {len(build_grid())}")
     print()
 
-    for key, cats in POI_CATEGORIES_GRID.items():
+    for key in grid_keys:
         print(f"--- {key} (grid) ---")
-        crawl_grid(key, cats)
+        crawl_grid(key, POI_CATEGORIES_GRID[key])
         time.sleep(2)
 
-    for key, cats in POI_CATEGORIES_CITY.items():
+    for key in city_keys:
         print(f"--- {key} (city) ---")
-        crawl_city(key, cats)
+        crawl_city(key, POI_CATEGORIES_CITY[key])
         time.sleep(2)
 
     # 汇总
@@ -279,7 +290,12 @@ def run():
 
 
 if __name__ == "__main__":
+    only = None
     if "--estimate" in sys.argv:
         estimate()
+    elif "--only" in sys.argv:
+        idx = sys.argv.index("--only")
+        only = [c.strip() for c in sys.argv[idx + 1].split(",") if c.strip()]
+        run(only)
     else:
         run()
