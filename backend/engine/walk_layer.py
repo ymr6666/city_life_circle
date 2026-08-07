@@ -46,28 +46,52 @@ def adaptive_snap(layer, lat: float, lng: float, base_radius_m: float = 150,
     return [], base_radius_m
 
 
-def concave_hull_geojson(edge_ids, target=0.65, max_edges=15000):
-    """对可达道路边求凹包多边形 GeoJSON (等时圈真实边界)
-    - target: ST_ConcaveHull 的 target_percent, 越小越贴合路网
-    - 边太少(<3)返回 None; 过多(>max_edges)退化为凸包, 避免 Delaunay 过慢
-    注: pgr_alphaShape 在 pgRouting 4 已移除, 用 PostGIS ST_ConcaveHull 替代
+def reachable_polygon_geojson(coords, eps_deg=0.008, target=0.65, minpoints=3):
+    """可达区域多边形 GeoJSON (等时圈真实边界)
+
+    多模式下可达区域不连续: 中心步行区 + 远郊站点周围的小块。
+    若对全部可达节点求单个包, 远站点会把中间够不着的区域也拉进边界。
+    做法: ST_ClusterDBSCAN 按空间聚类 (eps≈800m), 每簇求 ST_ConcaveHull,
+    合并为 (Multi)Polygon。邻近小块(公交/地铁走廊)自动合并, 远郊孤岛保持分离。
+
+    - coords: [(lng, lat), ...] 可达路网节点
+    - eps_deg: 聚类半径 (0.008 ≈ 800m)
+    - target: ConcaveHull target_percent
     """
-    edges = [e for e in edge_ids if e and e > 0]
-    if len(edges) < 3:
+    if not coords or len(coords) < 3:
         return None
+    lngs = [float(c[0]) for c in coords]
+    lats = [float(c[1]) for c in coords]
     try:
-        if len(edges) > max_edges:
+        rows = execute_query("""
+            WITH pts AS (
+                SELECT lng, lat,
+                       ST_ClusterDBSCAN(ST_SetSRID(ST_MakePoint(lng, lat), 4326), %s, %s) OVER () AS cid
+                FROM unnest(%s::float[], %s::float[]) AS t(lng, lat)
+            )
+            SELECT cid, array_agg(lng), array_agg(lat)
+            FROM pts WHERE cid IS NOT NULL GROUP BY cid
+        """, (eps_deg, minpoints, lngs, lats))
+        polys = []
+        for cid, clng, clat in rows:
+            if len(clng) < 3:
+                continue
             row = execute_one("""
-                SELECT ST_AsGeoJSON(ST_ConvexHull(ST_Collect(r.geometry)))
-                FROM hefei_roads r WHERE r.id = ANY(%s)
-            """, (edges,))
-        else:
-            row = execute_one("""
-                SELECT ST_AsGeoJSON(ST_ConcaveHull(ST_Collect(r.geometry), %s, true))
-                FROM hefei_roads r WHERE r.id = ANY(%s)
-            """, (target, edges))
-        if row and row[0]:
-            return json.loads(row[0])
+                SELECT ST_AsGeoJSON(ST_ConcaveHull(ST_Collect(ST_SetSRID(ST_MakePoint(lng, lat), 4326)), %s, true))
+                FROM unnest(%s::float[], %s::float[]) AS t(lng, lat)
+            """, (target, clng, clat))
+            if row and row[0]:
+                polys.append(json.loads(row[0]))
+        if polys:
+            if len(polys) == 1:
+                return polys[0]
+            rings = []
+            for p in polys:
+                if p.get("type") == "Polygon":
+                    rings.append(p["coordinates"])
+                elif p.get("type") == "MultiPolygon":
+                    rings.extend(p["coordinates"])
+            return {"type": "MultiPolygon", "coordinates": rings}
     except Exception:
         pass
     return None
@@ -232,8 +256,7 @@ class WalkLayer(TransportLayer):
 
         start_ids = [c['id'] for c in candidates]
         rows = execute_query("""
-            SELECT dd.node, MIN(dd.agg_cost) as agg_cost, v.y AS lng, v.x AS lat,
-                   MIN(dd.edge) AS edge
+            SELECT dd.node, MIN(dd.agg_cost) as agg_cost, v.y AS lng, v.x AS lat
             FROM pgr_drivingDistance(%s, %s, %s, directed := %s) dd
             JOIN hefei_roads_vertices_pgr v ON v.id = dd.node
             WHERE dd.agg_cost <= %s
@@ -246,8 +269,8 @@ class WalkLayer(TransportLayer):
         node_ids = [n['node'] for n in nodes]
         pois = self.reachable_pois(node_ids)
 
-        # 等时圈真实边界: 对可达道路边求凹包 (walk 无公交, 边均为道路边)
-        polygon = concave_hull_geojson([r[4] for r in rows])
+        # 等时圈真实边界: 可达节点空间聚类(DBSCAN), 每簇求凹包 (不连续区域)
+        polygon = reachable_polygon_geojson([(n['lng'], n['lat']) for n in nodes])
 
         return {
             "origin": {"lat": lat, "lng": lng},

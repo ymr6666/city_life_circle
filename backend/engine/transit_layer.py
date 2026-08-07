@@ -22,7 +22,7 @@
 + 出站后再可达的节点。公交数据未就绪时 raise ValueError 给出明确提示。
 """
 from .base_layer import TransportLayer
-from .walk_layer import WalkLayer, adaptive_snap, concave_hull_geojson
+from .walk_layer import WalkLayer, adaptive_snap, reachable_polygon_geojson
 from .cycle_layer import CycleLayer
 from .drive_layer import DriveLayer
 from services.database import execute_query, execute_one
@@ -276,7 +276,7 @@ class TransitLayer(TransportLayer):
         # 道路模式为 walk 时方向无关; cycle/drive 需尊重单行道 (公交/换乘边本身双向)
         directed = self.road_mode != "walk"
         rows = execute_query("""
-            SELECT dd.node, MIN(dd.agg_cost) as agg_cost, MIN(dd.edge) AS edge
+            SELECT dd.node, MIN(dd.agg_cost) as agg_cost
             FROM pgr_drivingDistance(%s, %s, %s, directed := %s) dd
             WHERE dd.agg_cost <= %s
             GROUP BY dd.node
@@ -289,17 +289,12 @@ class TransitLayer(TransportLayer):
         agg = {}
         metro_ids = []
         bus_stop_ids = []
-        road_edges = []
-        for nid, cost, edge in rows:
+        for nid, cost in rows:
             agg[nid] = float(cost)
             if nid >= BUS_OFFSET:
                 bus_stop_ids.append(nid - BUS_OFFSET)
             elif nid >= METRO_OFFSET:
                 metro_ids.append(nid - METRO_OFFSET)
-            else:
-                # 只收集道路边 (edge < METRO_EDGE_OFF=300000), 过滤公交/地铁/换乘虚边
-                if edge and edge < _METRO_EDGE_OFF:
-                    road_edges.append(edge)
 
         road_nodes = self._road_node_details(agg)
         metro_stations = self._metro_details(metro_ids, agg) if "metro" in self.transit_modes else []
@@ -308,8 +303,8 @@ class TransitLayer(TransportLayer):
         road_node_ids = [n["node"] for n in road_nodes]
         pois = self.reachable_pois(road_node_ids)
 
-        # 等时圈真实边界: 基于可达道路边求凹包
-        polygon = concave_hull_geojson(road_edges)
+        # 等时圈真实边界: 可达节点空间聚类(DBSCAN), 每簇求凹包 (多模式为不连续区域)
+        polygon = reachable_polygon_geojson([(n['lng'], n['lat']) for n in road_nodes])
 
         result = {
             "origin": {"lat": lat, "lng": lng},
