@@ -25,6 +25,8 @@
 from .base_layer import TransportLayer
 from services.database import execute_query, execute_one
 
+import json
+
 # 自适应吸附的半径阶梯: 默认半径找不到时逐级放大 (点可能在校区/公园内部或坐标偏移)
 ADAPTIVE_RADII = (150, 300, 500, 800)
 
@@ -42,6 +44,33 @@ def adaptive_snap(layer, lat: float, lng: float, base_radius_m: float = 150,
         if cands:
             return cands, r
     return [], base_radius_m
+
+
+def concave_hull_geojson(edge_ids, target=0.65, max_edges=15000):
+    """对可达道路边求凹包多边形 GeoJSON (等时圈真实边界)
+    - target: ST_ConcaveHull 的 target_percent, 越小越贴合路网
+    - 边太少(<3)返回 None; 过多(>max_edges)退化为凸包, 避免 Delaunay 过慢
+    注: pgr_alphaShape 在 pgRouting 4 已移除, 用 PostGIS ST_ConcaveHull 替代
+    """
+    edges = [e for e in edge_ids if e and e > 0]
+    if len(edges) < 3:
+        return None
+    try:
+        if len(edges) > max_edges:
+            row = execute_one("""
+                SELECT ST_AsGeoJSON(ST_ConvexHull(ST_Collect(r.geometry)))
+                FROM hefei_roads r WHERE r.id = ANY(%s)
+            """, (edges,))
+        else:
+            row = execute_one("""
+                SELECT ST_AsGeoJSON(ST_ConcaveHull(ST_Collect(r.geometry), %s, true))
+                FROM hefei_roads r WHERE r.id = ANY(%s)
+            """, (target, edges))
+        if row and row[0]:
+            return json.loads(row[0])
+    except Exception:
+        pass
+    return None
 
 
 class WalkLayer(TransportLayer):
@@ -203,7 +232,8 @@ class WalkLayer(TransportLayer):
 
         start_ids = [c['id'] for c in candidates]
         rows = execute_query("""
-            SELECT dd.node, MIN(dd.agg_cost) as agg_cost, v.y AS lng, v.x AS lat
+            SELECT dd.node, MIN(dd.agg_cost) as agg_cost, v.y AS lng, v.x AS lat,
+                   MIN(dd.edge) AS edge
             FROM pgr_drivingDistance(%s, %s, %s, directed := %s) dd
             JOIN hefei_roads_vertices_pgr v ON v.id = dd.node
             WHERE dd.agg_cost <= %s
@@ -216,6 +246,9 @@ class WalkLayer(TransportLayer):
         node_ids = [n['node'] for n in nodes]
         pois = self.reachable_pois(node_ids)
 
+        # 等时圈真实边界: 对可达道路边求凹包 (walk 无公交, 边均为道路边)
+        polygon = concave_hull_geojson([r[4] for r in rows])
+
         return {
             "origin": {"lat": lat, "lng": lng},
             "snap_candidates": candidates,
@@ -224,6 +257,7 @@ class WalkLayer(TransportLayer):
             "distance_budget_m": round(distance_budget_m, 1),
             "reachable_nodes_count": len(nodes),
             "reachable_nodes": nodes,
+            "polygon": polygon,
             "reachable_pois_count": len(pois),
             "pois": pois,
         }

@@ -2,6 +2,7 @@ from flask import Flask
 from routes.isochrone import isochrone_bp
 from routes.geocode import geocode_bp
 from routes.poi_stat import poi_stat_bp
+from routes.roads import roads_bp
 
 
 def create_app():
@@ -9,6 +10,16 @@ def create_app():
     app.register_blueprint(isochrone_bp)
     app.register_blueprint(geocode_bp)
     app.register_blueprint(poi_stat_bp)
+    app.register_blueprint(roads_bp)
+
+    # CORS: 允许前端 (file:// 打开 viewer.html 或其它域名) 跨域调用 API
+    @app.after_request
+    def add_cors_headers(resp):
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return resp
+
     return app
 
 

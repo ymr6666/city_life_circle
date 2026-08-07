@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>城市生活圈 - 功能查看器</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+  html, body { margin:0; height:100%; font-family: "Microsoft YaHei", sans-serif; }
+  #controls {
+    position: fixed; top:0; left:0; right:0; z-index:1000;
+    background: #fff; padding: 8px 12px; box-shadow: 0 2px 6px rgba(0,0,0,.2);
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px;
+  }
+  #controls label { display: inline-flex; align-items: center; gap: 4px; }
+  #controls input[type=text], #controls input[type=number] { width: 80px; padding: 3px 5px; }
+  #controls input[type=text].addr { width: 180px; }
+  #controls select { padding: 3px 5px; }
+  #controls button { padding: 4px 12px; cursor: pointer; }
+  #map { position: absolute; inset: 0; }
+  #status {
+    position: fixed; left: 12px; bottom: 8px; z-index: 1000;
+    background: rgba(0,0,0,.7); color: #fff; padding: 4px 10px;
+    border-radius: 4px; font-size: 12px; max-width: 60%;
+  }
+  #legend {
+    position: fixed; right: 12px; top: 60px; z-index: 1000;
+    background: #fff; border: 1px solid #ccc; padding: 8px; font-size: 12px;
+    border-radius: 4px; max-height: 60%; overflow: auto;
+  }
+  #legend .row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+  #legend .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .hint { color: #888; }
+</style>
+</head>
+<body>
+
+<div id="controls">
+  <label>地址 <input class="addr" id="addr" placeholder="如 合肥南站"></label>
+  <button id="btnGeocode">搜地址</button>
+  <span class="hint">|</span>
+  <label>纬度 <input type="text" id="lat" value="31.861"></label>
+  <label>经度 <input type="text" id="lng" value="117.285"></label>
+  <select id="mode">
+    <option value="walk">步行</option>
+    <option value="cycle">骑行</option>
+    <option value="drive">驾车</option>
+    <option value="walk+metro">步行+地铁</option>
+    <option value="walk+bus">步行+公交</option>
+    <option value="walk+metro+bus" selected>步行+地铁+公交</option>
+  </select>
+  <label><input type="number" id="time" value="30" min="1" max="120" style="width:60px"> 分钟</label>
+  <button id="btnIso">正算等时圈</button>
+  <button id="btnRev">反算覆盖</button>
+  <label><input type="checkbox" id="showPoints" checked> 点云</label>
+  <label><input type="checkbox" id="showRoads" checked> 路网</label>
+  <select id="roadMode">
+    <option value="all">路网:全部</option>
+    <option value="walk">路网:步行</option>
+    <option value="cycle">路网:骑行</option>
+    <option value="drive">路网:驾车</option>
+  </select>
+  <button id="btnClear">清空</button>
+</div>
+
+<div id="map"></div>
+<div id="status">就绪</div>
+<div id="legend"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+<script>
+const API = 'http://localhost:5000/api';
+
+// ---------- 地图 ----------
+const map = L.map('map', { preferCanvas: true }).setView([31.86, 117.28], 12);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap'
+}).addTo(map);
+// 天地图备选(需 key): 在 https://lbs.tianditu.gov.cn 注册拿 tk, 取消下面注释并填入
+// L.tileLayer('https://t{s}.tianditu.gov.cn/vec_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vec&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=你的KEY', { subdomains:['0','1','2','3','4','5','6','7'], maxZoom:18, attribution:'&copy; 天地图' }).addTo(map);
+
+// ---------- 图层 ----------
+let groups = [];   // 存放所有叠加层, 清空用
+function addLayer(l) { groups.push(l); l.addTo(map); }
+
+// ---------- 路网图层 (按视口动态加载) ----------
+map.createPane('roads');
+map.getPane('roads').style.zIndex = 200;   // 低于设施/等时圈图层
+let roadLayer = null;
+
+function roadColor(highway) {
+  const h = (highway || '').toLowerCase();
+  if (h.includes('motorway') || h.includes('trunk')) return '#e57373';
+  if (h.includes('primary')) return '#ffb74d';
+  if (h.includes('secondary')) return '#ffd54f';
+  if (h.includes('tertiary') || h.includes('residential')) return '#90a4ae';
+  return '#b0bec5';
+}
+
+async function loadRoads() {
+  const on = document.getElementById('showRoads').checked;
+  if (!on) { if (roadLayer) { roadLayer.remove(); roadLayer = null; } return; }
+  const b = map.getBounds();
+  const mode = document.getElementById('roadMode').value;
+  const url = `${API}/roads?minlng=${b.getWest()}&minlat=${b.getSouth()}&maxlng=${b.getEast()}&maxlat=${b.getNorth()}&mode=${mode}`;
+  try {
+    const r = await fetch(url);
+    const j = await r.json();
+    if (roadLayer) roadLayer.remove();
+    if (j && j.features && j.features.length) {
+      roadLayer = L.geoJSON(j, {
+        pane: 'roads',
+        style: f => ({ color: roadColor(f.properties.highway), weight: 1.2, opacity: 0.8 }),
+        interactive: false,
+      }).addTo(map);
+    } else {
+      roadLayer = null;
+    }
+  } catch (e) { /* 忽略加载失败 */ }
+}
+let roadTimer = null;
+function scheduleRoads() {
+  clearTimeout(roadTimer);
+  roadTimer = setTimeout(loadRoads, 350);
+}
+map.on('moveend', scheduleRoads);
+document.getElementById('showRoads').addEventListener('change', scheduleRoads);
+document.getElementById('roadMode').addEventListener('change', scheduleRoads);
+
+const CAT_COLORS = {
+  hospital: '#d32f2f', supermarket: '#f57c00', park: '#388e3c',
+  mall: '#7b1fa2', school_primary: '#1976d2', school_junior: '#303f9f',
+  school_senior: '#283593', school_college: '#5e35b1', kindergarten: '#e91e63',
+  market_food: '#6d4c41', street_commercial: '#fbc02d', street_pedestrian: '#00838f',
+  pharmacy: '#ad1457', sports: '#2e7d32',
+};
+const CAT_LABEL = {
+  hospital: '医院', supermarket: '超市', park: '公园', mall: '商场',
+  school_primary: '小学', school_junior: '初中', school_senior: '高中',
+  school_college: '大学', kindergarten: '幼儿园', market_food: '农贸',
+  street_commercial: '商业街', street_pedestrian: '步行街',
+  pharmacy: '药店', sports: '体育',
+};
+
+// ---------- 工具 ----------
+function status(msg) { document.getElementById('status').textContent = msg; }
+function pts2fc(points) {
+  return {
+    type: 'FeatureCollection',
+    features: points.map(p => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [p.lng, p.lat] } }))
+  };
+}
+function hullGeojson(points) {
+  if (points.length < 3) return null;
+  try { return turf.convex(pts2fc(points)); } catch (e) { return null; }
+}
+function getInput() {
+  return {
+    lat: parseFloat(document.getElementById('lat').value),
+    lng: parseFloat(document.getElementById('lng').value),
+    mode: document.getElementById('mode').value,
+    time: parseInt(document.getElementById('time').value) || 15,
+  };
+}
+async function post(url, body) {
+  const r = await fetch(API + url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const j = await r.json().catch(() => ({}));
+  return { ok: r.ok, status: r.status, data: j };
+}
+
+// ---------- 绘制 ----------
+function drawNodeLayer(points, color, radius, opacity) {
+  return L.geoJSON(pts2fc(points), {
+    pointToLayer: (f, ll) => L.circleMarker(ll, { radius: radius, color: color, fillOpacity: opacity, weight: 1 }),
+  });
+}
+
+function drawIsochrone(d) {
+  const nodes = d.reachable_nodes || d.reachable_road_nodes || [];
+  status(`可达路网节点 ${nodes.length} | POI ${d.reachable_pois_count || 0}`
+    + (d.reachable_metro_stations_count != null ? ` | 地铁 ${d.reachable_metro_stations_count}` : '')
+    + (d.reachable_bus_stops_count != null ? ` | 公交 ${d.reachable_bus_stops_count}` : ''));
+
+  // 面: 优先用后端等时圈真实边界(polygon), 否则前端 turf 凸包兜底
+  const areaGeojson = d.polygon || hullGeojson(nodes);
+  if (areaGeojson) {
+    addLayer(L.geoJSON(areaGeojson, { style: { color: '#1976d2', weight: 2, fillColor: '#1976d2', fillOpacity: 0.12 } }));
+  }
+  // 点云
+  if (document.getElementById('showPoints').checked && nodes.length <= 8000) {
+    addLayer(drawNodeLayer(nodes, '#1976d2', 2, 0.45));
+  }
+  // 设施
+  const cats = d.pois_by_category || {};
+  for (const [cat, info] of Object.entries(cats)) {
+    const items = info.items || [];
+    const c = CAT_COLORS[cat] || '#607d8b';
+    if (items.length) addLayer(drawNodeLayer(items, c, 3, 0.7));
+  }
+  // 地铁站 / 公交站
+  if (d.reachable_metro_stations && d.reachable_metro_stations.length) {
+    addLayer(drawNodeLayer(d.reachable_metro_stations, '#009688', 5, 0.9));
+  }
+  if (d.reachable_bus_stops && d.reachable_bus_stops.length) {
+    addLayer(drawNodeLayer(d.reachable_bus_stops, '#ff7043', 2, 0.5));
+  }
+  // 视角
+  const all = nodes.concat(Object.values(cats).flatMap(c => c.items || []));
+  if (all.length) {
+    map.fitBounds(L.latLngBounds(all.map(p => [p.lat, p.lng])), { padding: [40, 40] });
+  }
+}
+
+function drawReverse(d) {
+  const fs = d.facilities || [];
+  status(`覆盖起点: ${fs.length ? fs[0].reachable_origins_count : 0}`
+    + (d.intersection ? ` | 交集 ${d.intersection.reachable_origins_count}` : ''));
+  for (const f of fs) {
+    if (f.polygon) addLayer(L.geoJSON(f.polygon, { style: { color: '#1565c0', weight: 2, fillColor: '#1565c0', fillOpacity: 0.15 } }));
+  }
+  if (d.intersection && d.intersection.polygon) {
+    addLayer(L.geoJSON(d.intersection.polygon, { style: { color: '#2e7d32', weight: 2, fillColor: '#2e7d32', fillOpacity: 0.3 } }));
+  }
+}
+
+// ---------- 事件 ----------
+async function doIso() {
+  const { lat, lng, mode, time } = getInput();
+  if (isNaN(lat) || isNaN(lng)) { status('请输入合法坐标'); return; }
+  status('正算中...');
+  const r = await post('/isochrone', { lat, lng, mode, time_budget_min: time });
+  if (!r.ok) { status(`正算失败 ${r.status}: ${(r.data && r.data.error) || ''}`); return; }
+  drawIsochrone(r.data);
+}
+
+async function doRev() {
+  const { lat, lng, mode, time } = getInput();
+  if (isNaN(lat) || isNaN(lng)) { status('请输入合法坐标'); return; }
+  status('反算中...');
+  const r = await post('/reverse-isochrone', { facilities: [{ lat, lng }], mode, time_budget_min: time });
+  if (!r.ok) { status(`反算失败 ${r.status}: ${(r.data && r.data.error) || ''}`); return; }
+  drawReverse(r.data);
+}
+
+async function doGeocode() {
+  const kw = document.getElementById('addr').value.trim();
+  if (!kw) return;
+  status('搜索地址...');
+  const r = await fetch(`${API}/geocode?keywords=${encodeURIComponent(kw)}&region=合肥&limit=3`);
+  const j = await r.json().catch(() => null);
+  if (!r.ok || !j || !j.results || !j.results.length) { status('未找到该地址'); return; }
+  const hit = j.results[0];
+  document.getElementById('lat').value = hit.lat;
+  document.getElementById('lng').value = hit.lng;
+  map.setView([hit.lat, hit.lng], 15);
+  status(`地址: ${hit.name || hit.address || ''} (${hit.lat.toFixed(5)}, ${hit.lng.toFixed(5)})`);
+}
+
+function doClear() { groups.forEach(g => g.remove()); groups = []; status('已清空'); }
+
+document.getElementById('btnIso').onclick = doIso;
+document.getElementById('btnRev').onclick = doRev;
+document.getElementById('btnGeocode').onclick = doGeocode;
+document.getElementById('btnClear').onclick = doClear;
+document.getElementById('addr').addEventListener('keydown', e => { if (e.key === 'Enter') doGeocode(); });
+document.getElementById('lat').addEventListener('keydown', e => { if (e.key === 'Enter') doIso(); });
+document.getElementById('lng').addEventListener('keydown', e => { if (e.key === 'Enter') doIso(); });
+
+// 图例
+(function () {
+  const el = document.getElementById('legend');
+  let html = '<div class="row"><b>图例</b></div>';
+  html += '<div class="row"><span class="dot" style="background:#1976d2"></span> 可达节点/等时圈</div>';
+  html += '<div class="row"><span class="dot" style="background:#009688"></span> 地铁站</div>';
+  html += '<div class="row"><span class="dot" style="background:#ff7043"></span> 公交站</div>';
+  for (const [cat, label] of Object.entries(CAT_LABEL)) {
+    const c = CAT_COLORS[cat];
+    html += `<div class="row"><span class="dot" style="background:${c}"></span> ${label}</div>`;
+  }
+  el.innerHTML = html;
+})();
+</script>
+</body>
+</html>

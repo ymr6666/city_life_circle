@@ -110,9 +110,8 @@ def isochrone():
         "origin": {"lat": lat, "lng": lng},
         "start_node": result['snap_candidates'][0],
         "reachable_pois_count": len(result['pois']),
-        "reachable_facilities_count": sum(v['count'] for v in facilities_by_category.values()),
         "pois_by_category": category_stats,
-        "facilities_by_category": facilities_by_category,
+        "polygon": result.get('polygon'),
     }
 
     # 单道路模式 (walk/cycle/drive)
