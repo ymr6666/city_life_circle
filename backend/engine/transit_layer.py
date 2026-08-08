@@ -22,10 +22,12 @@
 + 出站后再可达的节点。公交数据未就绪时 raise ValueError 给出明确提示。
 """
 from .base_layer import TransportLayer
-from .walk_layer import WalkLayer, adaptive_snap, reachable_polygon_geojson
+from .walk_layer import (WalkLayer, adaptive_snap, reachable_polygon_geojson,
+                         reachable_polygon_from_edges, _edges_within_nodes)
 from .cycle_layer import CycleLayer
 from .drive_layer import DriveLayer
-from services.database import execute_query, execute_one
+from services.database import (execute_query, execute_one, execute_query_fresh,
+                               execute_one_fresh)
 from config import (WALK_SPEED_KMH, CYCLE_SPEED_KMH,
                     DRIVE_SPEED_KMH, BUS_SPEED_KMH)
 
@@ -81,6 +83,11 @@ class TransitLayer(TransportLayer):
     def directed(self) -> bool:
         """道路模式为 walk 时方向无关; cycle/drive 需尊重单行道"""
         return self.road_mode != "walk"
+
+    @property
+    def ok_column(self) -> str:
+        """道路边可达列 (edges-in-set 反查用)"""
+        return f"{self.road_mode}_ok"
 
     # ── 数据就绪检查 ─────────────────────────────────────────
     def _check_data(self):
@@ -262,7 +269,7 @@ class TransitLayer(TransportLayer):
 
     # ── 端到端可达性计算 ─────────────────────────────────────
     def compute_reachability(self, lat: float, lng: float, time_budget_min: float,
-                             snap_radius_m: float = 150, snap_max_nodes: int = 3) -> dict:
+                             snap_radius_m: float = 150, snap_max_nodes: int = 1) -> dict:
         """1. 吸附起点 → 2. 耦合图单次 Dijkstra → 3. 按节点偏移分离三类结果 → 4. POI 反查"""
         self._check_data()
 
@@ -275,22 +282,27 @@ class TransitLayer(TransportLayer):
 
         # 道路模式为 walk 时方向无关; cycle/drive 需尊重单行道 (公交/换乘边本身双向)
         directed = self.road_mode != "walk"
-        rows = execute_query("""
-            SELECT dd.node, MIN(dd.agg_cost) as agg_cost
+        # Dijkstra 用全新连接规避复用连接退化 (execute_query_fresh)
+        rows = execute_query_fresh("""
+            SELECT dd.node, dd.edge, dd.agg_cost
             FROM pgr_drivingDistance(%s, %s, %s, directed := %s) dd
             WHERE dd.agg_cost <= %s
-            GROUP BY dd.node
-            ORDER BY agg_cost
         """, (edge_sql, start_ids, time_budget_min, directed, time_budget_min))
 
         if not rows:
             return None
 
         agg = {}
+        road_edges = set()
         metro_ids = []
         bus_stop_ids = []
-        for nid, cost in rows:
-            agg[nid] = float(cost)
+        for nid, edge, cost in rows:
+            cost = float(cost)
+            if nid not in agg or cost < agg[nid]:
+                agg[nid] = cost
+            # 道路边 id < _METRO_EDGE_OFF (地铁/公交/换乘边用 300000+/400000+/... 偏移)
+            if edge is not None and edge >= 0 and edge < _METRO_EDGE_OFF:
+                road_edges.add(edge)
             if nid >= BUS_OFFSET:
                 bus_stop_ids.append(nid - BUS_OFFSET)
             elif nid >= METRO_OFFSET:
@@ -303,8 +315,21 @@ class TransitLayer(TransportLayer):
         road_node_ids = [n["node"] for n in road_nodes]
         pois = self.reachable_pois(road_node_ids)
 
-        # 等时圈真实边界: 可达节点空间聚类(DBSCAN), 每簇求凹包 (多模式为不连续区域)
-        polygon = reachable_polygon_geojson([(n['lng'], n['lat']) for n in road_nodes])
+        # 等时圈真实边界: 可达道路路段 buffer 重建 (主), 节点凹包兜底
+        #  - 边集用"预算内可遍历边": 公交/地铁模式也填充为连续面,
+        #    避免最短路径树边造成的蛛网/破碎形状, 又不过度填充
+        #  - 可达 POI 点位各 buffer 30m, 保证"可达"的设施都落在圈内。
+        speed_mh = ROAD_SPEED_KMH[self.road_mode] * 1000.0
+        road_cost = {nid: c for nid, c in agg.items() if nid < METRO_OFFSET}
+        seed_lines = [(lng, lat, c['lng'], c['lat']) for c in candidates]
+        seed_points = [(p['lng'], p['lat']) for p in pois[:1200]]
+        all_edges = _edges_within_nodes(road_node_ids, self.ok_column,
+                                        node_cost=road_cost, budget=time_budget_min,
+                                        edge_cost_sql=f"r.cost * 60.0 / {speed_mh}") \
+            or list(road_edges)
+        polygon = reachable_polygon_from_edges(all_edges, seed_lines=seed_lines,
+                                               seed_points=seed_points) or \
+                  reachable_polygon_geojson([(n['lng'], n['lat']) for n in road_nodes])
 
         result = {
             "origin": {"lat": lat, "lng": lng},

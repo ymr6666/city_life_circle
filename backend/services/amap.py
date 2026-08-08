@@ -18,9 +18,10 @@ from pathlib import Path
 
 import requests
 
-from engine.coord_utils import gcj02_to_wgs84
+from engine.coord_utils import gcj02_to_wgs84, wgs84_to_gcj02
 
 AMAP_PLACE_TEXT_URL = "https://restapi.amap.com/v5/place/text"
+AMAP_REGEO_URL = "https://restapi.amap.com/v3/geocode/regeo"
 DEFAULT_REGION = "合肥"
 MAX_PAGE_SIZE = 25
 
@@ -111,3 +112,57 @@ def geocode_keywords(keywords, region=DEFAULT_REGION, limit=5, types=None):
             "lat": round(wlat, 6),
         })
     return results
+
+
+def regeo(lng: float, lat: float, poinums: int = 3):
+    """逆地理编码: WGS84 坐标 → 格式化地址 + 最近 POI。
+
+    坐标统一为 WGS84 (lng/lat), 内部转 GCJ-02 调高德 /v3/geocode/regeo,
+    返回:
+      {address, province, city, district, township, neighborhood,
+       poi: {name, address, type, distance_m} | None}
+    无 AMAP_KEY 时抛 RuntimeError。
+    """
+    key = _resolve_key()
+    if not key:
+        raise RuntimeError("高德 AMAP_KEY 未配置: 请设置环境变量 AMAP_KEY 或 scripts/crawlers/config.py")
+
+    glng, glat = wgs84_to_gcj02(float(lng), float(lat))
+    params = {
+        "key": key,
+        "location": f"{glng},{glat}",
+        "extensions": "all",
+        "poinum": max(1, min(int(poinums), 10)),
+    }
+    resp = requests.get(AMAP_REGEO_URL, params=params, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+    if data.get("status") != "1":
+        raise RuntimeError(f"高德逆地理编码失败: {data.get('info', 'unknown error')}")
+
+    rc = data.get("regeocode") or {}
+    ac = rc.get("addressComponent") or {}
+    poi = None
+    for p in (rc.get("pois") or [])[:poinums]:
+        plng, plat = _parse_location(p.get("location", ""))
+        if plng is None:
+            continue
+        poi = {
+            "name": p.get("name", ""),
+            "address": p.get("address", ""),
+            "type": p.get("type", ""),
+            "distance_m": float(p.get("distance") or 0),
+            "lng": round(plng, 6),
+            "lat": round(plat, 6),
+        }
+        break
+
+    return {
+        "address": rc.get("formatted_address", ""),
+        "province": ac.get("province", ""),
+        "city": ac.get("city", []),
+        "district": ac.get("district", ""),
+        "township": ac.get("township", ""),
+        "neighborhood": ac.get("neighborhood", ""),
+        "poi": poi,
+    }

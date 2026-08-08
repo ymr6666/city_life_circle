@@ -15,6 +15,8 @@ import json
 from flask import Blueprint, request, jsonify
 
 from services.database import execute_query
+from engine.poi_stats import build_facilities_by_category
+from engine.population import population_in_geojson
 
 poi_stat_bp = Blueprint('poi_stat', __name__)
 
@@ -76,7 +78,7 @@ def poi_stat():
     cat_count = defaultdict(int)
     cat_subs = defaultdict(lambda: defaultdict(int))
     cat_items = defaultdict(list)
-    facilities = defaultdict(dict)   # category -> {facility_id: {...}}
+    pois = []
     for cat, sub, lng, lat, pid, name, fid, fname, flng, flat, fsub in rows:
         cat_count[cat] += 1
         for code in (sub or '').split('|'):
@@ -85,11 +87,19 @@ def poi_stat():
         if include_items and len(cat_items[cat]) < 200:
             cat_items[cat].append({"id": pid, "name": name, "sub_category": sub,
                                    "lng": lng, "lat": lat})
-        fac = facilities[cat].setdefault(fid, {
-            "name": fname, "sub_category": fsub,
-            "lng": flng, "lat": flat, "count": 0,
+        pois.append({
+            "category": cat,
+            "id": pid,
+            "name": name,
+            "sub_category": sub,
+            "lng": lng,
+            "lat": lat,
+            "facility_id": fid,
+            "facility_name": fname,
+            "fac_lng": flng,
+            "fac_lat": flat,
+            "fac_sub_category": fsub,
         })
-        fac["count"] += 1
 
     pois_by_category = {}
     for cat in sorted(cat_count, key=lambda c: -cat_count[c]):
@@ -101,16 +111,12 @@ def poi_stat():
             entry["items"] = cat_items[cat]
         pois_by_category[cat] = entry
 
-    facilities_by_category = {}
-    for cat, fac_map in facilities.items():
-        facilities_by_category[cat] = {
-            "count": len(fac_map),
-            "items": sorted(fac_map.values(), key=lambda f: -f['count']),
-        }
+    facilities_by_category = build_facilities_by_category(pois, include_items=include_items)
 
     try:
         metro = _count_stations('hefei_metro_stations', geom_json)
         bus = _count_stations('hefei_bus_stops', geom_json)
+        population = population_in_geojson(geom_json)
     except Exception:
         return jsonify({"error": "invalid or unsupported polygon"}), 400
 
@@ -121,4 +127,5 @@ def poi_stat():
         "facilities_by_category": facilities_by_category,
         "metro_stations": metro,
         "bus_stops": bus,
+        "population": population,
     })

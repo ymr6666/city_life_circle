@@ -1,7 +1,11 @@
 from flask import Blueprint, request, jsonify
 from engine.factory import build_layer
 from engine.reverse import reverse_reachability
+from engine.poi_stats import build_facilities_by_category
+from engine.population import population_in_geojson, population_density
+from engine.access_cache import reachability_cached
 from collections import defaultdict
+import json
 
 isochrone_bp = Blueprint('isochrone', __name__)
 
@@ -18,6 +22,7 @@ def reverse_isochrone():
     mode = data.get('mode', 'walk')
     time_budget_min = data.get('time_budget_min', 15)
     snap_radius_m = data.get('snap_radius_m', 150)
+    snap_max_nodes = data.get('snap_max_nodes', 1)
 
     if not isinstance(facilities, list) or not facilities:
         return jsonify({"error": "facilities (list of {lat,lng}) required"}), 400
@@ -30,7 +35,8 @@ def reverse_isochrone():
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
-    result = reverse_reachability(layer, facilities, time_budget_min, snap_radius_m)
+    result = reverse_reachability(layer, facilities, time_budget_min, snap_radius_m,
+                                  snap_max_nodes)
     if not result:
         return jsonify({"error": "no accessible road node near facilities"}), 404
 
@@ -50,17 +56,19 @@ def isochrone():
     mode = data.get('mode', 'walk')
     time_budget_min = data.get('time_budget_min', 15)
     snap_radius_m = data.get('snap_radius_m', 150)
+    snap_max_nodes = data.get('snap_max_nodes', 1)
 
     if lat is None or lng is None:
         return jsonify({"error": "lat and lng are required"}), 400
 
     try:
-        layer = build_layer(mode)
+        build_layer(mode)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
     try:
-        result = layer.compute_reachability(lat, lng, time_budget_min, snap_radius_m)
+        result = reachability_cached(lat, lng, mode, time_budget_min, snap_radius_m,
+                                     snap_max_nodes)
     except ValueError as e:
         # 公交/地铁数据未就绪
         return jsonify({"error": str(e)}), 503
@@ -69,40 +77,27 @@ def isochrone():
         return jsonify({"error": "no accessible road node near origin"}), 404
 
     pois_by_category = defaultdict(list)
-    facilities = defaultdict(dict)   # category -> {facility_id: {...}}
     for poi in result['pois']:
         item = {
             "id": poi['id'],
             "name": poi['name'],
+            "address": poi.get('address') or '',
+            "category": poi['category'],
             "sub_category": poi['sub_category'],
             "lng": poi['lng'],
             "lat": poi['lat'],
             "distance_m": poi['distance_m'],
+            "rating": poi.get('rating') or '',
+            "cost": poi.get('cost') or '',
+            "opentime_today": poi.get('opentime_today') or '',
         }
         pois_by_category[poi['category']].append(item)
 
-        fid = poi['facility_id']
-        fac = facilities[poi['category']].setdefault(fid, {
-            "name": poi['facility_name'],
-            "sub_category": poi['fac_sub_category'],
-            "lng": poi['fac_lng'],
-            "lat": poi['fac_lat'],
-            "count": 0,
-            "items": [],
-        })
-        fac["count"] += 1
-        fac["items"].append(item)
+    facilities_by_category = build_facilities_by_category(result['pois'], include_items=False)
 
     category_stats = {}
     for cat, items in pois_by_category.items():
-        category_stats[cat] = {"count": len(items), "items": items}
-
-    facilities_by_category = {}
-    for cat, fac_map in facilities.items():
-        facilities_by_category[cat] = {
-            "count": len(fac_map),
-            "items": sorted(fac_map.values(), key=lambda f: -f['count']),
-        }
+        category_stats[cat] = {"count": len(items), "items": _sample(items, 300)}
 
     response = {
         "mode": mode,
@@ -110,25 +105,42 @@ def isochrone():
         "origin": {"lat": lat, "lng": lng},
         "start_node": result['snap_candidates'][0],
         "reachable_pois_count": len(result['pois']),
+        "reachable_facilities_count": sum(v['count'] for v in facilities_by_category.values()),
         "pois_by_category": category_stats,
+        "facilities_by_category": facilities_by_category,
         "polygon": result.get('polygon'),
     }
+
+    # 圈内覆盖人口 (100m 人口栅格)
+    polygon = result.get('polygon')
+    if polygon:
+        pop, dens = population_density(json.dumps(polygon))
+        response['reachable_population'] = pop
+        response['population_density_per_km2'] = dens
 
     # 单道路模式 (walk/cycle/drive)
     if result.get('distance_budget_m') is not None:
         response['distance_budget_m'] = result['distance_budget_m']
         response['reachable_nodes_count'] = result['reachable_nodes_count']
-        response['reachable_nodes'] = result['reachable_nodes']
+        response['reachable_nodes'] = _sample(result['reachable_nodes'], 5000)
     else:
         # 耦合模式: 道路节点 + 各公交模式
-        transit_modes = getattr(layer, 'transit_modes', ())
+        transit_modes = tuple(m for m in ('metro', 'bus') if m in (mode or ''))
         response['reachable_road_nodes_count'] = result['reachable_road_nodes_count']
-        response['reachable_road_nodes'] = result['reachable_road_nodes']
+        response['reachable_road_nodes'] = _sample(result['reachable_road_nodes'], 3000)
         if 'metro' in transit_modes:
             response['reachable_metro_stations_count'] = result['reachable_metro_stations_count']
             response['reachable_metro_stations'] = result['reachable_metro_stations']
         if 'bus' in transit_modes:
             response['reachable_bus_stops_count'] = result['reachable_bus_stops_count']
-            response['reachable_bus_stops'] = result['reachable_bus_stops']
+            response['reachable_bus_stops'] = _sample(result['reachable_bus_stops'], 1000)
 
     return jsonify(response)
+
+
+def _sample(points, max_n):
+    """均匀抽样: 超过 max_n 个点则取子集, 缩小响应体"""
+    if not points or len(points) <= max_n:
+        return points
+    step = len(points) / float(max_n)
+    return [points[int(i * step)] for i in range(max_n)]

@@ -1,0 +1,115 @@
+:root {
+  --primary: #1976d2;
+  --primary-light: #e3f0fb;
+  --primary-dark: #0d5cad;
+  --text: #263238;
+  --text-2: #607d8b;
+  --text-3: #90a4ae;
+  --border: #e0e6ec;
+  --bg-panel: #ffffff;
+  --bg-app: #f2f4f7;
+  --shadow: 0 1px 4px rgba(38, 50, 56, 0.10), 0 4px 16px rgba(38, 50, 56, 0.08);
+  --shadow-sm: 0 1px 3px rgba(38, 50, 56, 0.10);
+  --radius: 10px;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app {
+  margin: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei",
+    "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  color: var(--text);
+  background: var(--bg-app);
+  font-size: 13px;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.btn {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  transition: all .15s ease;
+}
+.btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
+.btn.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.btn.primary:hover { background: var(--primary-dark); color: #fff; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+input[type="text"], input[type="number"], select {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+  outline: none;
+}
+input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(25, 118, 210, .12); }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #c5ced6; border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* 选点模式: 地图容器十字光标 */
+.leaflet-container.pick-mode { cursor: crosshair !important; }
+.leaflet-container.pick-mode .leaflet-interactive { cursor: crosshair !important; }
+
+/* 缩放动画期间隐藏覆盖层(缓冲区/点/标记), 完成后恢复 —— 避免与底图错位 */
+.leaflet-pane.zoom-hide { visibility: hidden !important; }
+
+/* 分析点/当前位置 DOM 标记 (divIcon) */
+.pt-icon { background: transparent; border: none; }
+.pt-icon .pt-pin {
+  width: 13px; height: 13px; border-radius: 50%;
+  border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4);
+  transform: translate(-50%, -50%);
+}
+.pt-icon .pt-lbl {
+  position: absolute; top: -27px; left: 6px; white-space: nowrap;
+  background: rgba(25, 118, 210, .95); color: #fff; font-size: 11px;
+  padding: 2px 7px; border-radius: 5px; box-shadow: 0 1px 4px rgba(0,0,0,.3);
+  max-width: 280px; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* 人口密度开关按钮 (地图左下角) */
+.ctl-btn {
+  display: flex; align-items: center; gap: 6px;
+  border: 1px solid var(--border); background: #fff; color: var(--text);
+  border-radius: 8px; padding: 6px 12px; font-size: 12.5px;
+  box-shadow: 0 1px 4px rgba(38, 50, 56, .18); cursor: pointer;
+  font-family: inherit;
+}
+.ctl-btn:hover { border-color: var(--primary); color: var(--primary); }
+.ctl-btn .ctl-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #cfd8dc; border: 1px solid #90a4ae;
+}
+.ctl-btn.on { background: var(--primary); border-color: var(--primary); color: #fff; }
+.ctl-btn.on .ctl-dot { background: #fff; border-color: #fff; }
+
+/* 设施弹窗 */
+.leaflet-popup-content .fac-pop-addr {
+  color: #607d8b; font-size: 11.5px; margin-top: 3px; line-height: 1.5;
+}
+.leaflet-popup-content .fac-pop-sub { color: #90a4ae; font-size: 11px; margin-top: 2px; }
+
+/* 人口格弹窗 */
+.pop-pop { font-size: 12px; color: #455a64; line-height: 1.7; }
+.pop-pop .pp-title { font-weight: 700; color: #263238; margin-bottom: 2px; }
+.pop-pop b { color: #e65100; }

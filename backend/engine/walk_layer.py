@@ -23,9 +23,11 @@
   步行方向无关 (directed := false), 行人在任何道路可双向行走
 """
 from .base_layer import TransportLayer
-from services.database import execute_query, execute_one
+from services.database import (execute_query, execute_one, execute_one_fresh,
+                               execute_query_fresh)
 
 import json
+import math
 
 # 自适应吸附的半径阶梯: 默认半径找不到时逐级放大 (点可能在校区/公园内部或坐标偏移)
 ADAPTIVE_RADII = (150, 300, 500, 800)
@@ -46,13 +48,207 @@ def adaptive_snap(layer, lat: float, lng: float, base_radius_m: float = 150,
     return [], base_radius_m
 
 
-def reachable_polygon_geojson(coords, eps_deg=0.008, target=0.65, minpoints=3):
-    """可达区域多边形 GeoJSON (等时圈真实边界)
+def _polygon_area_m2(ring):
+    """粗略多边形面积 (米²): 经纬度按 shoelace, 用 cos(mean_lat) 修正经度"""
+    n = len(ring)
+    if n < 3:
+        return 0.0
+    mean_lat = sum(p[1] for p in ring) / n
+    k = 111320.0 * math.cos(math.radians(mean_lat))
+    area = 0.0
+    for i in range(n - 1):
+        x1, y1 = (ring[i][0] * k, ring[i][1] * 111320.0)
+        x2, y2 = (ring[i + 1][0] * k, ring[i + 1][1] * 111320.0)
+        area += x1 * y2 - x2 * y1
+    return abs(area) / 2.0
+
+
+def _fill_small_holes(coords, max_hole_frac=0.05):
+    """填充多边形小洞: 内环面积 < 外环面积 * max_hole_frac 时移除。
+
+    等时圈多边形由道路走廊 buffer 生成, 街区内部会留下孔洞 (看起来破碎)。
+    街块通常远小于外环, 填充之; 大面积空洞 (湖泊/大公园) 保留。"""
+    if len(coords) <= 1:
+        return coords
+    outer_area = _polygon_area_m2(coords[0])
+    if outer_area <= 0:
+        return coords
+    kept = [coords[0]]
+    for ring in coords[1:]:
+        if _polygon_area_m2(ring) >= max_hole_frac * outer_area:
+            kept.append(ring)
+    return kept
+
+
+def _drop_small_parts(geojson, min_area_m2=20000, max_hole_frac=0.05):
+    """去掉过小的碎块 (MultiPolygon 部分) 并填充小洞, 减少视觉噪点"""
+    if not geojson:
+        return geojson
+    t = geojson.get("type")
+    if t == "Polygon":
+        if _polygon_area_m2(geojson["coordinates"][0]) < min_area_m2:
+            return None
+        return {"type": "Polygon",
+                "coordinates": _fill_small_holes(geojson["coordinates"], max_hole_frac)}
+    if t == "MultiPolygon":
+        kept = [{"coordinates": _fill_small_holes(p, max_hole_frac), "type": "Polygon"}
+                for p in geojson["coordinates"]
+                if _polygon_area_m2(p[0]) >= min_area_m2]
+        if not kept:
+            return None
+        parts = [p["coordinates"] for p in kept]
+        if len(parts) == 1:
+            return {"type": "Polygon", "coordinates": parts[0]}
+        return {"type": "MultiPolygon", "coordinates": parts}
+    return geojson
+
+
+def _normalize_collection(geojson):
+    """GeometryCollection → MultiPolygon (若为多个 Polygon 合并)"""
+    if not geojson or geojson.get("type") != "GeometryCollection":
+        return geojson
+    rings = []
+    for g in geojson.get("geometries", []):
+        if g.get("type") == "Polygon":
+            rings.append(g["coordinates"])
+        elif g.get("type") == "MultiPolygon":
+            rings.extend(g["coordinates"])
+    if not rings:
+        return None
+    if len(rings) == 1:
+        return {"type": "Polygon", "coordinates": rings[0]}
+    return {"type": "MultiPolygon", "coordinates": rings}
+
+
+def _edges_within_nodes(node_ids, ok_column, node_cost=None, budget=None,
+                        edge_cost_sql=None):
+    """可达节点集内的"预算内可遍历"道路边。
+
+    仅包含两端点可达、且**从某一端沿该边能在预算内到达对端**的边。
+    相比最短路径树边 (无环、稀疏→破碎) 更丰满; 相比"两端点都在集合内即收录"
+    (会把两条可达走廊之间不可达的道路也填进来 → 过度填充) 更准确。
+
+    - node_cost: {node: 到起点成本} (单模式为米, 耦合模式为分钟)
+    - budget: 时间/距离预算
+    - edge_cost_sql: 该边的成本表达式 (单模式 "r.cost"; 耦合模式
+      "r.cost * 60.0 / speed_mh")
+    未提供 node_cost/budget 时退化为"两端点都在集合内"。
+    """
+    if not node_ids or len(node_ids) < 2:
+        return []
+    if node_cost is not None and budget is not None:
+        vals = ','.join(['(%s, %s)'] * len(node_ids))
+        params = []
+        for n in node_ids:
+            params += [n, node_cost[n]]
+        params += [budget, budget]
+        rows = execute_query(f"""
+            WITH nc(node, cost) AS (VALUES {vals})
+            SELECT DISTINCT r.id
+            FROM hefei_roads r JOIN nc ON nc.node = r.source OR nc.node = r.target
+            WHERE r.cost > 0 AND r.{ok_column}
+              AND ((nc.node = r.source AND nc.cost + {edge_cost_sql} <= %s)
+                OR (nc.node = r.target AND nc.cost + {edge_cost_sql} <= %s))
+        """, tuple(params))
+        return [r[0] for r in rows]
+
+    phs = ','.join(['%s'] * len(node_ids))
+    rows = execute_query(f"""
+        SELECT id FROM hefei_roads
+        WHERE source IN ({phs}) AND target IN ({phs}) AND cost > 0 AND {ok_column}
+    """, tuple(node_ids) * 2)
+    return [r[0] for r in rows]
+
+
+def reachable_polygon_from_edges(edge_ids, buffer_m=30.0, simplify=0.00015,
+                                 min_area_m2=20000, min_area_frac=0.05,
+                                 seed_lines=None, seed_points=None):
+    """可达路段 → 等时圈真实边界 (主方案)
+
+    可达路段做街道宽度 buffer 后 union, 边界严格贴合道路网络走向,
+    比"节点凸包/凹包"更平滑更真实。多模式下道路不连通的孤立区域
+    自然保持分离 (MultiPolygon), 即公交/地铁走廊形成的可达孤岛。
+
+    碎块过滤用动态面积阈值: 保留 >= min_area_m2 的所有块, 且至少保留
+    最大块的 min_area_frac 比例 (随等时圈尺度自适应, 避免一刀切误删
+    大孤岛或留下密集小碎点)。
+
+    - edge_ids: 可达道路边 id 列表
+    - buffer_m: buffer 宽度 (街道走廊)
+    - simplify: ST_SimplifyPreserveTopology 容差 (度)
+    - min_area_m2: 最小保留面积 (米²)
+    - min_area_frac: 最大块的保留比例 (0.05 = 5%)
+    - seed_lines: 额外吸附连线 [(lng1,lat1,lng2,lat2), ...] —— 把 POI
+      到路网吸附点的连线也 buffer 进多边形, 保证覆盖范围包住 POI 本身
+      (反算时 POI 常离道路几十到几百米, 否则会落在走廊间隙里)。
+    - seed_points: 额外可达点 [(lng, lat), ...] —— 每个点 buffer 进多边形。
+      POI 通常离道路 30~150m, 仅靠道路走廊会把它排除在圈外 ("可达但圈外")。
+      把所有可达 POI 点位各 buffer buffer_m, 确保圈内设施视觉上都在圈内。
+    """
+    edge_ids = [int(e) for e in edge_ids if e is not None and e >= 0]
+    if not edge_ids and not seed_lines and not seed_points:
+        return None
+
+    parts = []
+    params = []
+    if edge_ids:
+        phs = ','.join(['%s'] * len(edge_ids))
+        parts.append(
+            f"SELECT ST_Buffer(geometry::geography, {buffer_m})::geometry AS g "
+            f"FROM hefei_roads WHERE id IN ({phs})")
+        params += edge_ids
+    if seed_lines:
+        vals = []
+        for (x1, y1, x2, y2) in seed_lines:
+            vals.append("(%s, %s, %s, %s)")
+            params += [x1, y1, x2, y2]
+        parts.append(
+            "SELECT ST_Buffer(ST_MakeLine("
+            "ST_SetSRID(ST_MakePoint(l.x1, l.y1), 4326), "
+            "ST_SetSRID(ST_MakePoint(l.x2, l.y2), 4326))::geography, "
+            f"{buffer_m})::geometry AS g "
+            f"FROM (VALUES {','.join(vals)}) AS l(x1, y1, x2, y2)")
+    if seed_points:
+        vals = []
+        for (x, y) in seed_points:
+            vals.append("(%s, %s)")
+            params += [x, y]
+        parts.append(
+            f"SELECT ST_Buffer(ST_SetSRID(ST_MakePoint(l.x, l.y), 4326)::geography, "
+            f"{buffer_m})::geometry AS g "
+            f"FROM (VALUES {','.join(vals)}) AS l(x, y)")
+
+    try:
+        # 用全新连接规避同一后端会话内 GEOS union/simplify 退化 (见 execute_one_fresh)
+        row = execute_one_fresh(f"""
+            WITH e AS (
+                {" UNION ALL ".join(parts)}
+            )
+            SELECT ST_AsGeoJSON(ST_SimplifyPreserveTopology(ST_Union(g), {simplify})) FROM e
+        """, tuple(params))
+    except Exception:
+        return None
+    if row and row[0]:
+        try:
+            g = _normalize_collection(json.loads(row[0]))
+            if not g or g.get("type") not in ("Polygon", "MultiPolygon"):
+                return None
+            rings = ([g["coordinates"]] if g["type"] == "Polygon"
+                      else [p for p in g["coordinates"]])
+            areas = [_polygon_area_m2(r[0]) for r in rings]
+            thr = max(min_area_m2, min_area_frac * max(areas))
+            return _drop_small_parts(g, thr)
+        except (ValueError, KeyError):
+            return None
+    return None
+
+
+def reachable_polygon_geojson(coords, eps_deg=0.008, target=0.8, minpoints=3):
+    """可达区域多边形 GeoJSON (兜底方案: 仅当边域重建失败时使用)
 
     多模式下可达区域不连续: 中心步行区 + 远郊站点周围的小块。
-    若对全部可达节点求单个包, 远站点会把中间够不着的区域也拉进边界。
     做法: ST_ClusterDBSCAN 按空间聚类 (eps≈800m), 每簇求 ST_ConcaveHull,
-    合并为 (Multi)Polygon。邻近小块(公交/地铁走廊)自动合并, 远郊孤岛保持分离。
+    合并为 (Multi)Polygon。相比旧版 target 0.65 改为 0.8, 轮廓更平滑。
 
     - coords: [(lng, lat), ...] 可达路网节点
     - eps_deg: 聚类半径 (0.008 ≈ 800m)
@@ -77,21 +273,27 @@ def reachable_polygon_geojson(coords, eps_deg=0.008, target=0.65, minpoints=3):
             if len(clng) < 3:
                 continue
             row = execute_one("""
-                SELECT ST_AsGeoJSON(ST_ConcaveHull(ST_Collect(ST_SetSRID(ST_MakePoint(lng, lat), 4326)), %s, true))
+                SELECT ST_AsGeoJSON(
+                    ST_SimplifyPreserveTopology(
+                        ST_ConcaveHull(ST_Collect(ST_SetSRID(ST_MakePoint(lng, lat), 4326)), %s, true),
+                        %s
+                    )
+                )
                 FROM unnest(%s::float[], %s::float[]) AS t(lng, lat)
-            """, (target, clng, clat))
+            """, (target, 0.00005, clng, clat))
             if row and row[0]:
                 polys.append(json.loads(row[0]))
         if polys:
             if len(polys) == 1:
-                return polys[0]
+                return _drop_small_parts(polys[0], 1000)
             rings = []
             for p in polys:
                 if p.get("type") == "Polygon":
                     rings.append(p["coordinates"])
                 elif p.get("type") == "MultiPolygon":
                     rings.extend(p["coordinates"])
-            return {"type": "MultiPolygon", "coordinates": rings}
+            g = {"type": "MultiPolygon", "coordinates": rings}
+            return _drop_small_parts(g, 1000)
     except Exception:
         pass
     return None
@@ -234,7 +436,7 @@ class WalkLayer(TransportLayer):
 
     # ── 一体化: 多起点吸附 + Dijkstra + POI 查询 ──────────────────
     def compute_reachability(self, lat: float, lng: float, time_budget_min: float,
-                             snap_radius_m: float = 150, snap_max_nodes: int = 3) -> dict:
+                             snap_radius_m: float = 150, snap_max_nodes: int = 1) -> dict:
         """端到端的可达性计算 (test_walk.py / API 调用入口)
 
         流程:
@@ -255,22 +457,48 @@ class WalkLayer(TransportLayer):
             return None
 
         start_ids = [c['id'] for c in candidates]
-        rows = execute_query("""
-            SELECT dd.node, MIN(dd.agg_cost) as agg_cost, v.y AS lng, v.x AS lat
+        # Dijkstra 用全新连接规避复用连接退化 (execute_query_fresh)
+        rows = execute_query_fresh("""
+            SELECT dd.node, dd.edge, dd.agg_cost
             FROM pgr_drivingDistance(%s, %s, %s, directed := %s) dd
-            JOIN hefei_roads_vertices_pgr v ON v.id = dd.node
             WHERE dd.agg_cost <= %s
-            GROUP BY dd.node, v.x, v.y
-            ORDER BY agg_cost
         """, (self._edge_sql(), start_ids, distance_budget_m, self.directed, distance_budget_m))
 
-        nodes = [{"node": r[0], "agg_cost": float(r[1]), "lng": float(r[2]), "lat": float(r[3])} for r in rows]
+        if not rows:
+            return None
+
+        # 聚合节点最优成本 + 收集可达边 (多边形用)
+        node_cost = {}
+        edges = set()
+        for node, edge, cost in rows:
+            if node not in node_cost or cost < node_cost[node]:
+                node_cost[node] = float(cost)
+            if edge is not None and edge >= 0:
+                edges.add(edge)
+
+        phs = ','.join(['%s'] * len(node_cost))
+        coord_rows = execute_query(f"""
+            SELECT id, y AS lng, x AS lat FROM hefei_roads_vertices_pgr WHERE id IN ({phs})
+        """, tuple(node_cost.keys()))
+        coord = {r[0]: (float(r[1]), float(r[2])) for r in coord_rows}
+        nodes = [{"node": nid, "agg_cost": node_cost[nid],
+                  "lng": coord[nid][0], "lat": coord[nid][1]}
+                 for nid in sorted(node_cost, key=lambda k: node_cost[k]) if nid in coord]
 
         node_ids = [n['node'] for n in nodes]
         pois = self.reachable_pois(node_ids)
 
-        # 等时圈真实边界: 可达节点空间聚类(DBSCAN), 每簇求凹包 (不连续区域)
-        polygon = reachable_polygon_geojson([(n['lng'], n['lat']) for n in nodes])
+        # 等时圈真实边界: 可达路段 buffer 重建 (主), 节点凹包兜底
+        #  - 边集用"预算内可遍历边", 圈更丰满且不越界
+        #  - 可达 POI 点位各 buffer 30m, 保证"可达"的设施都落在圈内
+        seed_lines = [(lng, lat, c['lng'], c['lat']) for c in candidates]
+        all_edges = _edges_within_nodes(node_ids, self.ok_column,
+                                        node_cost=node_cost, budget=distance_budget_m,
+                                        edge_cost_sql="r.cost") or list(edges)
+        seed_points = [(p['lng'], p['lat']) for p in pois[:1200]]
+        polygon = reachable_polygon_from_edges(all_edges, seed_lines=seed_lines,
+                                               seed_points=seed_points) or \
+                  reachable_polygon_geojson([(n['lng'], n['lat']) for n in nodes])
 
         return {
             "origin": {"lat": lat, "lng": lng},
