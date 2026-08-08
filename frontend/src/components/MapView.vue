@@ -4,7 +4,8 @@ import L from 'leaflet'
 import { store, togglePopLayer } from '../store'
 
 const el = ref(null)
-const TIANDITU_KEY = '8b48e6297b3e826d59276c9bd56dbc7e'
+// 天地图 key 从 .env.local 读取 (VITE_TIANDITU_KEY, 已 gitignore), 缺失时自动回退 OSM
+const TIANDITU_KEY = import.meta.env.VITE_TIANDITU_KEY || ''
 
 function tianditu(layer) {
   // 天地图 WMTS 路径带 _w 后缀 (vec->vec_w, cva->cva_w, img->img_w, cia->cia_w)

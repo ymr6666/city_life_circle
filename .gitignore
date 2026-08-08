@@ -37,6 +37,9 @@ cache/
 frontend/node_modules/
 frontend/dist/
 frontend/vite.log
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
 
 # Database / data backups
 backups/
