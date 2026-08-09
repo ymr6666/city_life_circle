@@ -29,8 +29,8 @@ export const api = {
     postJson('/poi-stat', { polygon, include_items: includeItems }),
   score: (lat, lng, mode, time, weights = null, family = 'none', snapRadius = 150) =>
     postJson('/score', { lat, lng, mode, time_budget_min: time, snap_radius_m: snapRadius, weights, family }),
-  grid: (bbox, cellSizeDeg = 0.01, metric = 'score', category = null) =>
-    postJson('/grid', { bbox, cell_size_deg: cellSizeDeg, metric, category }),
+  grid: (bbox, cellSizeDeg = 0.01, metric = 'score', category = null, gridType = 'hex') =>
+    postJson('/grid', { bbox, cell_size_deg: cellSizeDeg, metric, category, grid_type: gridType }),
   roads: (bounds, mode = 'all') => {
     const q = `minlng=${bounds.getWest()}&minlat=${bounds.getSouth()}` +
       `&maxlng=${bounds.getEast()}&maxlat=${bounds.getNorth()}&mode=${mode}`

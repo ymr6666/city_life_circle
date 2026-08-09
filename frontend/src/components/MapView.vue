@@ -53,10 +53,13 @@ onMounted(() => {
     minZoom: 9,
     maxNativeZoom: 14,
     maxZoom: 18,
-    opacity: 0.85,
+    opacity: store.popOpacity,
+    zIndex: 300,   // 高于底图瓦片(默认1), 低于叠加层(overlayPane 400), 切换底图时不被盖住
     bounds: [[31.55, 116.95], [32.20, 117.62]],
     attribution: '人口: WorldPop 2020',
   })
+  // 人口透明度变化时同步
+  watch(() => store.popOpacity, (v) => popLayer.setOpacity(v))
 
   L.control.layers({
     '天地图 矢量': tiandituVec,
@@ -93,14 +96,12 @@ onMounted(() => {
   map.createPane('roads')
   map.getPane('roads').style.zIndex = 200
 
-  // 缩放过程中隐藏覆盖层(缓冲区/点/标记), 完成后显示 —— 避免与底图动画错位
+  // 缩放过程中隐藏覆盖层(缓冲区/点/标记/路网), 完成后显示 —— 避免与底图动画错位
   const hidePanes = () => {
-    map.getPane('overlayPane')?.classList.add('zoom-hide')
-    map.getPane('markerPane')?.classList.add('zoom-hide')
+    ;['overlayPane', 'markerPane', 'roads'].forEach((n) => map.getPane(n)?.classList.add('zoom-hide'))
   }
   const showPanes = () => {
-    map.getPane('overlayPane')?.classList.remove('zoom-hide')
-    map.getPane('markerPane')?.classList.remove('zoom-hide')
+    ;['overlayPane', 'markerPane', 'roads'].forEach((n) => map.getPane(n)?.classList.remove('zoom-hide'))
   }
   map.on('zoomstart', hidePanes)
   map.on('zoomend', showPanes)

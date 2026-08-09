@@ -9,6 +9,10 @@ export const store = reactive({
   // 人口密度图层 (单一状态源)
   popLayer: null,
   popOn: false,
+  popOpacity: 0.7,
+  // 当前定位 (分析页共享给分级色彩作中心点)
+  pointLat: 31.861,
+  pointLng: 117.285,
 })
 
 // 切换人口密度图层 (地图按钮 / 人口页共用, 保证状态一致)
@@ -29,6 +33,8 @@ export const CAT_COLORS = {
   school_college: '#5e35b1', kindergarten: '#e91e63', market_food: '#6d4c41',
   street_commercial: '#fbc02d', street_pedestrian: '#00838f',
   pharmacy: '#ad1457', sports: '#2e7d32',
+  bank: '#455a64', elderly_care: '#8d6e63', library: '#3949ab',
+  culture: '#d81b60', post: '#00897b', government: '#5c6bc0',
 }
 
 export const CAT_LABEL = {
@@ -37,4 +43,6 @@ export const CAT_LABEL = {
   school_college: '大学', kindergarten: '幼儿园', market_food: '农贸',
   street_commercial: '商业街', street_pedestrian: '步行街',
   pharmacy: '药店', sports: '体育',
+  bank: '银行', elderly_care: '养老', library: '图书馆',
+  culture: '文化场馆', post: '邮政', government: '政务',
 }

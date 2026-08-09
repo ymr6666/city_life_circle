@@ -259,26 +259,40 @@ export function scheduleRoads(mode) {
   roadTimer = setTimeout(() => loadRoads(mode), 350)
 }
 
-// ---------- 六边形分级色彩 ----------
-export function drawHexGrid(fc, colorRamp) {
+// ---------- 六边形/四边形分级色彩 ----------
+// 按用户定义的分级区间着色: 区间 i → 红绿渐变中对应位置的色
+export function classBreaksColor(breaks) {
+  const n = breaks.length - 1
+  const colors = []
+  for (let i = 0; i < n; i++) colors.push(scoreRamp((100 * (i + 0.5)) / n))
+  return (v) => {
+    if (v == null || isNaN(v)) return 'rgba(200,200,200,0.6)'
+    for (let i = 0; i < n; i++) {
+      if (v <= breaks[i + 1] || i === n - 1) return colors[i]
+    }
+    return colors[n - 1]
+  }
+}
+
+export function drawHexGrid(fc, colorFn) {
   return addGeoJson(fc, (f) => {
-    const s = f.properties.score
+    const c = colorFn(f.properties)
     return {
-      color: 'rgba(0,0,0,0.10)', weight: 0.7, fillColor: colorRamp(s), fillOpacity: 0.8,
+      color: 'rgba(0,0,0,0.10)', weight: 0.7, fillColor: c, fillOpacity: 0.8,
     }
   })
 }
 
-// 连续色阶 (白 → 蓝 → 深蓝), 专业 GIS 风格 (综合评分用)
+// 连续色阶 (红 → 黄 → 绿), 高低分区分明显 (综合评分用)
 export function scoreRamp(v) {
   const t = Math.max(0, Math.min(1, v / 100))
   const stops = [
-    [0.00, '#f5f8fb'],
-    [0.20, '#dbe7f4'],
-    [0.40, '#aecdea'],
-    [0.60, '#7ab2e0'],
-    [0.80, '#3f8fd0'],
-    [1.00, '#0f62b5'],
+    [0.00, '#d73027'],
+    [0.25, '#fc8d59'],
+    [0.45, '#fee08b'],
+    [0.55, '#d9ef8b'],
+    [0.75, '#66bd63'],
+    [1.00, '#1a9850'],
   ]
   for (let i = 1; i < stops.length; i++) {
     if (t <= stops[i][0]) {

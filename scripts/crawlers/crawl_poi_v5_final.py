@@ -134,10 +134,12 @@ def crawl_grid(category_key, cats):
 
         for kw, typecode in cats:
             params = {
-                "key": AMAP_KEY, "keywords": kw, "types": typecode,
+                "key": AMAP_KEY, "keywords": kw,
                 "polygon": poly, "page_size": PAGE_SIZE, "page_num": 1,
                 "show_fields": SHOW_FIELDS,
             }
+            if typecode:
+                params["types"] = typecode
             data = api_get(URL_POLY, params)
             pois = data.get("pois", [])
             for p in pois:
@@ -180,11 +182,13 @@ def crawl_city(category_key, cats):
             if request_count >= 2500:
                 break
             params = {
-                "key": AMAP_KEY, "keywords": kw, "types": typecode,
+                "key": AMAP_KEY, "keywords": kw,
                 "region": HEFEI_BOUNDS["city"], "city_limit": "true",
                 "page_size": PAGE_SIZE, "page_num": pg,
                 "show_fields": SHOW_FIELDS,
             }
+            if typecode:
+                params["types"] = typecode
             data = api_get(URL_CITY, params)
             pois = data.get("pois", [])
             if not pois:

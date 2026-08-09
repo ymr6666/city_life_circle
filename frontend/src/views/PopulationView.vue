@@ -45,6 +45,11 @@ updateLegend()
         </button>
       </div>
       <div class="row">
+        <span class="lbl">透明度</span>
+        <input type="range" min="0.1" max="1" step="0.05" v-model.number="store.popOpacity" class="grow" />
+        <span class="val">{{ Math.round(store.popOpacity * 100) }}%</span>
+      </div>
+      <div class="row">
         <button class="btn grow" @click="fitHefei">定位合肥全域</button>
       </div>
 
@@ -70,6 +75,8 @@ updateLegend()
 }
 .title { font-weight: 600; font-size: 14px; margin-bottom: 10px; }
 .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.row .lbl { color: var(--text-2); font-size: 12px; width: 44px; flex-shrink: 0; }
+.row .val { font-size: 12px; color: var(--primary-dark); font-weight: 600; width: 40px; text-align: right; flex-shrink: 0; }
 .btn { border: 1px solid var(--border); background: #fff; color: var(--text); padding: 6px 10px; border-radius: 8px; font-size: 12.5px; cursor: pointer; }
 .btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
 .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }

@@ -26,15 +26,24 @@ MAX_CELLS = 20000
 # 网格综合评分维度: 个人评分(5维) + 居住(人口密度), 网格为宏观视角故保留居住维度
 GRID_DIMS = list(DIMENSION_LABEL) + ["living"]
 
-# 每维密度达标阈值 (个/km², 用于网格综合评分)
-DIM_DENSITY_CAPS = {
-    "medical": 8.0,
-    "education": 5.0,
-    "shopping": 12.0,
-    "leisure": 6.0,
-    "transit": 10.0,
-    "living": 12000.0,   # 人/km²
+# 各类设施密度达标阈值 (个/km²) —— 不同设施类型标准不同:
+# 高频/民生类 (药店/超市/幼儿园/小学) 阈值高, 低频/大型类 (医院/商场/高中/大学) 阈值低
+CATEGORY_DENSITY_CAPS = {
+    "hospital": 0.8, "pharmacy": 5.0,
+    "kindergarten": 1.5, "school_primary": 1.5, "school_junior": 0.6,
+    "school_senior": 0.4, "school_college": 0.2,
+    "supermarket": 3.0, "mall": 0.5, "market_food": 1.5, "street_commercial": 2.5,
+    "park": 0.8, "sports": 2.0, "street_pedestrian": 0.4,
 }
+
+# 每维密度达标阈值 (个/km², 用于网格综合评分) = 维度内各类达标阈值按权重加和
+# (与单类密度标准区分: 综合评分是多维度加权, 单类密度是各自独立阈值)
+DIM_DENSITY_CAPS = {
+    dim: round(sum(w * CATEGORY_DENSITY_CAPS.get(cat, 1.0) for cat, w in cats), 2)
+    for dim, cats in DIM_CATEGORIES.items()
+}
+DIM_DENSITY_CAPS["transit"] = 10.0     # 地铁×3 + 公交×0.5 加权站密度
+DIM_DENSITY_CAPS["living"] = 12000.0   # 人/km²
 METRO_WEIGHT = 3.0
 BUS_WEIGHT = 0.5
 
@@ -80,6 +89,12 @@ def grid():
         return jsonify({"error": "metric must be 'score' or 'density' or 'population'"}), 400
     category = data.get('category')
 
+    # 网格形状: square=四边形 / hex=六边形 (默认六边形)
+    grid_type = data.get('grid_type', 'hex')
+    if grid_type not in ('hex', 'square'):
+        return jsonify({"error": "grid_type must be 'hex' or 'square'"}), 400
+    grid_func = 'ST_SquareGrid' if grid_type == 'square' else 'ST_HexagonGrid'
+
     # 限制网格数量 (防超大范围)
     est_cols = (maxlng - minlng) / cell
     est_rows = (maxlat - minlat) / cell
@@ -89,7 +104,7 @@ def grid():
 
     bounds = (minlng, minlat, maxlng, maxlat)
     hex_sql = (f"SELECT (h).i AS i, (h).j AS j, ST_AsGeoJSON((h).geom) AS g "
-               f"FROM ST_HexagonGrid(%s, ST_MakeEnvelope(%s,%s,%s,%s,4326)) h")
+               f"FROM {grid_func}(%s, ST_MakeEnvelope(%s,%s,%s,%s,4326)) h")
 
     # 1. 六边形网格
     cells = execute_query(hex_sql, (cell, *bounds))
@@ -104,7 +119,7 @@ def grid():
     poi_rows = execute_query(f"""
         WITH hex AS (
             SELECT (h).i AS i, (h).j AS j, (h).geom AS geom
-            FROM ST_HexagonGrid(%s, ST_MakeEnvelope(%s,%s,%s,%s,4326)) h
+            FROM {grid_func}(%s, ST_MakeEnvelope(%s,%s,%s,%s,4326)) h
         )
         SELECT hex.i, hex.j, p.category, p.sub_category, count(*) AS n
         FROM hex JOIN hefei_poi p ON ST_Contains(hex.geom, p.geometry)
@@ -126,7 +141,7 @@ def grid():
     station_rows = execute_query(f"""
         WITH hex AS (
             SELECT (h).i AS i, (h).j AS j, (h).geom AS geom
-            FROM ST_HexagonGrid(%s, ST_MakeEnvelope(%s,%s,%s,%s,4326)) h
+            FROM {grid_func}(%s, ST_MakeEnvelope(%s,%s,%s,%s,4326)) h
         )
         SELECT hex.i, hex.j,
                (SELECT count(*) FROM hefei_metro_stations m WHERE ST_Contains(hex.geom, m.geometry)) AS metro,
@@ -138,7 +153,7 @@ def grid():
     pop_rows = execute_query(f"""
         WITH hex AS (
             SELECT (h).i AS i, (h).j AS j, (h).geom AS geom
-            FROM ST_HexagonGrid(%s, ST_MakeEnvelope(%s,%s,%s,%s,4326)) h
+            FROM {grid_func}(%s, ST_MakeEnvelope(%s,%s,%s,%s,4326)) h
         )
         SELECT hex.i, hex.j, COALESCE(SUM(g.population), 0)
         FROM hex LEFT JOIN hefei_pop_grid g ON ST_Contains(hex.geom, g.geometry)
@@ -183,9 +198,11 @@ def grid():
             else:
                 n = sum(v for k, v in cnt.items() if not k.startswith('_'))
             dens = n / area_km2 if area_km2 else 0.0
-            cap = DIM_DENSITY_CAPS.get(category, 8.0) if category else 10.0
+            # 单类密度按该设施类型自己的达标阈值 (不同设施标准不同)
+            cap = CATEGORY_DENSITY_CAPS.get(category, 3.0) if category else 10.0
             props["score"] = round(min(100.0, 100.0 * dens / cap), 1)
             props["density"] = round(dens, 1)
+            props["cap"] = cap
         elif metric == 'population':
             dens = population / area_km2 if area_km2 else 0.0
             props["density"] = round(dens, 0)
@@ -208,8 +225,10 @@ def grid():
         "features": features,
         "meta": {
             "bbox": bbox, "cell_size_deg": cell, "metric": metric,
-            "category": category, "cell_area_km2": area_km2,
+            "category": category, "grid_type": grid_type,
+            "cell_area_km2": area_km2,
             "n_cells": len(features),
+            "density_caps": CATEGORY_DENSITY_CAPS if metric == 'density' else None,
         },
     })
 

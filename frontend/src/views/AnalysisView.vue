@@ -4,7 +4,7 @@ import { api } from '../api'
 import { store } from '../store'
 import {
   drawIsochrone, drawReverse, clearRoads, scheduleRoads, clearOverlays,
-  setCurrentPoint, setPickMode, addLabeledMarker,
+  setCurrentPoint, setPickMode, addLabeledMarker, clearCurrentPoint,
 } from '../mapLayers'
 import StatsPanel from '../components/StatsPanel.vue'
 import ScoreCard from '../components/ScoreCard.vue'
@@ -129,6 +129,8 @@ function setActivePoint(pt) {
   lat.value = pt.lat
   lng.value = pt.lng
   addr.value = pt.address
+  store.pointLat = pt.lat
+  store.pointLng = pt.lng
   setCurrentPoint(pt.lat, pt.lng, pt.address)
   if (store.map) store.map.setView([pt.lat, pt.lng], Math.max(store.map.getZoom(), 14))
   statusText(`当前分析点 ${ptName(pt)}：${pt.address || `${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}`}`)
@@ -147,6 +149,7 @@ function clearPoints() {
   points.value = []
   activePointId.value = null
   clearOverlays()
+  clearCurrentPoint()
   statusText('已清空分析点')
 }
 function addPointFromCurrent() {
@@ -163,6 +166,8 @@ async function applyPoint(la, ln, keepActive = false) {
   lat.value = la
   lng.value = ln
   addr.value = ''
+  store.pointLat = la
+  store.pointLng = ln
   setCurrentPoint(la, ln, '')
   const r = await api.regeo(la, ln)
   if (r.ok && r.data && r.data.address) {
@@ -238,9 +243,10 @@ function redrawLayers() {
   clearOverlays()
   points.value.forEach((pt) => {
     if (!pt.visible) return
-    // 仅渲染: 有 iso 且该方式未被关闭 (modeVisible)
+    // 仅渲染: 有 iso + 左栏已勾选该方式 + 未在右栏关闭
     const modes = Object.keys(pt.results || {})
-      .filter((m) => pt.results[m] && pt.results[m].iso && pt.modeVisible[m] !== false)
+      .filter((m) => pt.results[m] && pt.results[m].iso
+        && selectedModes.value.includes(m) && pt.modeVisible[m] !== false)
     modes.forEach((m) => {
       const isViewed = pt.id === activePointId.value && m === statsMode.value
       drawIsochrone(pt.results[m].iso, {
@@ -424,6 +430,7 @@ function toggleRoads() {
 watch(selectedModes, () => {
   clearRoads()
   if (showRoads.value) scheduleRoads(modeForReverse())
+  redrawLayers()
 }, { deep: true })
 
 // ---------- 清空 ----------
@@ -431,6 +438,7 @@ function clearAll() {
   points.value.forEach((p) => { p.results = {}; p.viewedMode = null })
   lastReverse.value = null
   clearOverlays()
+  clearCurrentPoint()
   rightTab.value = 'stats'
   statusText('已清空图层与结果')
 }
