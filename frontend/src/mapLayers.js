@@ -16,8 +16,8 @@ export function addOverlay(layer) {
   layer.addTo(store.map)
 }
 
-export function addGeoJson(data, style) {
-  const l = L.geoJSON(data, { style })
+export function addGeoJson(data, style, options) {
+  const l = L.geoJSON(data, { style, ...(options || {}) })
   addOverlay(l)
   return l
 }
@@ -322,6 +322,29 @@ export function popRamp(v) {
       const [t0, c0] = stops[i - 1]
       const [t1, c1] = stops[i]
       const k = (v - t0) / (t1 - t0 || 1)
+      return lerpColor(c0, c1, k)
+    }
+  }
+  return stops[stops.length - 1][1]
+}
+
+// 盲区色阶: 绿(全覆盖/无盲区) → 黄 → 红(高盲区率)
+// v: 盲区率 0~1 (1=该格完全无服务)
+export function blindRamp(v) {
+  const t = Math.max(0, Math.min(1, v))
+  const stops = [
+    [0.00, '#1a9850'],
+    [0.20, '#66bd63'],
+    [0.40, '#d9ef8b'],
+    [0.55, '#fee08b'],
+    [0.75, '#fc8d59'],
+    [1.00, '#d73027'],
+  ]
+  for (let i = 1; i < stops.length; i++) {
+    if (t <= stops[i][0]) {
+      const [t0, c0] = stops[i - 1]
+      const [t1, c1] = stops[i]
+      const k = (t - t0) / (t1 - t0 || 1)
       return lerpColor(c0, c1, k)
     }
   }

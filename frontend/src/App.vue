@@ -6,6 +6,7 @@ import MapView from './components/MapView.vue'
 import AnalysisView from './views/AnalysisView.vue'
 import ChoroplethView from './views/ChoroplethView.vue'
 import PopulationView from './views/PopulationView.vue'
+import BlindZoneView from './views/BlindZoneView.vue'
 
 const tab = ref('analysis')
 watch(tab, (v) => {
@@ -24,6 +25,7 @@ watch(tab, (v) => {
     <AnalysisView v-show="tab === 'analysis'" />
     <ChoroplethView v-show="tab === 'choropleth'" />
     <PopulationView v-show="tab === 'population'" />
+    <BlindZoneView v-show="tab === 'blindzone'" />
 
     <!-- 顶栏 -->
     <header class="topbar">
@@ -38,6 +40,7 @@ watch(tab, (v) => {
         <button :class="['tab', { active: tab === 'analysis' }]" @click="tab = 'analysis'">生活圈分析</button>
         <button :class="['tab', { active: tab === 'choropleth' }]" @click="tab = 'choropleth'">分级色彩</button>
         <button :class="['tab', { active: tab === 'population' }]" @click="tab = 'population'">人口分布</button>
+        <button :class="['tab', { active: tab === 'blindzone' }]" @click="tab = 'blindzone'">服务盲区</button>
       </nav>
       <div class="spacer"></div>
       <div class="server-badge">API · localhost:5000</div>

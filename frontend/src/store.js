@@ -34,7 +34,7 @@ export const CAT_COLORS = {
   street_commercial: '#fbc02d', street_pedestrian: '#00838f',
   pharmacy: '#ad1457', sports: '#2e7d32',
   bank: '#455a64', elderly_care: '#8d6e63', library: '#3949ab',
-  culture: '#d81b60', post: '#00897b', government: '#5c6bc0',
+  culture: '#d81b60', government: '#5c6bc0',
 }
 
 export const CAT_LABEL = {
@@ -44,5 +44,5 @@ export const CAT_LABEL = {
   street_commercial: '商业街', street_pedestrian: '步行街',
   pharmacy: '药店', sports: '体育',
   bank: '银行', elderly_care: '养老', library: '图书馆',
-  culture: '文化场馆', post: '邮政', government: '政务',
+  culture: '文化场馆', government: '政务',
 }

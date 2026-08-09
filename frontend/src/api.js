@@ -31,6 +31,9 @@ export const api = {
     postJson('/score', { lat, lng, mode, time_budget_min: time, snap_radius_m: snapRadius, weights, family }),
   grid: (bbox, cellSizeDeg = 0.01, metric = 'score', category = null, gridType = 'hex') =>
     postJson('/grid', { bbox, cell_size_deg: cellSizeDeg, metric, category, grid_type: gridType }),
+  coverage: (body) => postJson('/coverage', body),
+  blindzone: (category, mode = 'walk', timeBudgetMin = 15, bbox = null, cellSizeDeg = 0.001, gridType = 'square', pointMode = true, maxPoints = 15000) =>
+    postJson('/blindzone', { category, mode, time_budget_min: timeBudgetMin, bbox, cell_size_deg: cellSizeDeg, grid_type: gridType, point_mode: pointMode, max_points: maxPoints }),
   roads: (bounds, mode = 'all') => {
     const q = `minlng=${bounds.getWest()}&minlat=${bounds.getSouth()}` +
       `&maxlng=${bounds.getEast()}&maxlat=${bounds.getNorth()}&mode=${mode}`

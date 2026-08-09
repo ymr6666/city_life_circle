@@ -258,13 +258,13 @@ def classify(cur, conn):
             WHEN bridge IS NOT NULL AND bridge != ''
                  AND (bridge LIKE '%yes%' OR bridge LIKE '%viaduct%')
             THEN CASE
-                WHEN layer IS NOT NULL AND layer != ''
-                     AND layer ~ '^-?[0-9]+$' AND layer::int > 0
-                THEN 'elevated'
                 WHEN highway LIKE '%footway%' OR highway LIKE '%pedestrian%'
                      OR highway LIKE '%path%' OR highway LIKE '%steps%'
                      OR highway LIKE '%cycleway%'
                 THEN 'footbridge'
+                WHEN layer IS NOT NULL AND layer != ''
+                     AND layer ~ '^-?[0-9]+$' AND layer::int > 0
+                THEN 'elevated'
                 ELSE 'bridge'
             END
             ELSE NULL
@@ -279,8 +279,14 @@ def classify(cur, conn):
               " AND COALESCE(highway,'') NOT LIKE '%motorway%'"
               " AND COALESCE(highway,'') NOT LIKE '%trunk%'")
 
-    # 立交高架: bridge_class=elevated, 或 无 layer 的 primary/secondary 桥(回退启发式)
-    elevated = ("COALESCE(bridge_class,'') = 'elevated'"
+    # 步行类道路 (footway/pedestrian/path/steps 等, 行人可走, 含天桥/连廊)
+    ped_hw = ("COALESCE(highway,'') LIKE '%footway%'"
+              " OR COALESCE(highway,'') LIKE '%pedestrian%'"
+              " OR COALESCE(highway,'') LIKE '%path%'"
+              " OR COALESCE(highway,'') LIKE '%steps%'")
+
+    # 立交高架(车行): bridge_class=elevated 且非步行类, 或 无 layer 的 primary/secondary 桥
+    elevated = ("(COALESCE(bridge_class,'') = 'elevated' AND NOT (" + ped_hw + "))"
                 " OR (COALESCE(bridge,'') LIKE '%yes%' AND layer IS NULL"
                 "     AND (COALESCE(highway,'') LIKE '%primary%'"
                 "          OR COALESCE(highway,'') LIKE '%secondary%'))")
