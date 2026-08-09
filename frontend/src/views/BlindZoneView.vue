@@ -15,6 +15,14 @@ const centerLng = ref(store.pointLng)
 const picking = ref(false)
 const meta = ref(null)
 const loading = ref(false)
+const tier = ref(null)
+
+const TIERS = [
+  { v: null, l: '全部' },
+  { v: 3, l: '三甲/综合' },
+  { v: 2, l: '+专科' },
+  { v: 1, l: '基层/全部' },
+]
 
 const CATS = [
   { v: 'hospital', l: '医院' }, { v: 'supermarket', l: '超市' }, { v: 'pharmacy', l: '药店' },
@@ -46,7 +54,7 @@ async function loadBlindZone() {
   loading.value = true
   const bbox = currentBBox()
   status.value = `计算 ${CATS.find((c) => c.v === category.value)?.l || category.value} ${timeBudget.value}min 盲区…`
-  const r = await api.blindzone(category.value, mode.value, timeBudget.value, bbox, 0.001, 'square', true, 15000)
+  const r = await api.blindzone(category.value, mode.value, timeBudget.value, bbox, 0.001, 'square', true, 15000, tier.value)
   loading.value = false
   if (!r.ok) { status.value = `盲区分析失败: ${r.data.error || r.status}`; return }
   render(r.data)
@@ -167,7 +175,7 @@ function exitPick() {
 }
 onBeforeUnmount(exitPick)
 onMounted(updateLegend)
-watch([category, mode, timeBudget, radiusKm, centerLat, centerLng], () => { if (meta.value) loadBlindZone() })
+watch([category, mode, timeBudget, radiusKm, centerLat, centerLng, tier], () => { if (meta.value) loadBlindZone() })
 </script>
 
 <template>
@@ -193,6 +201,14 @@ watch([category, mode, timeBudget, radiusKm, centerLat, centerLng], () => { if (
         <select v-model="category" class="grow">
           <option v-for="c in CATS" :key="c.v" :value="c.v">{{ c.l }}</option>
         </select>
+      </div>
+      <div class="row" v-if="category === 'hospital'">
+        <span class="lbl">等级</span>
+        <div class="presets">
+          <button v-for="t in TIERS" :key="String(t.v)"
+                  :class="['preset', { active: tier === t.v }]"
+                  @click="tier = t.v">{{ t.l }}</button>
+        </div>
       </div>
       <div class="row">
         <span class="lbl">阈值</span>

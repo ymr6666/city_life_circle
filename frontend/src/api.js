@@ -32,13 +32,23 @@ export const api = {
   grid: (bbox, cellSizeDeg = 0.01, metric = 'score', category = null, gridType = 'hex') =>
     postJson('/grid', { bbox, cell_size_deg: cellSizeDeg, metric, category, grid_type: gridType }),
   coverage: (body) => postJson('/coverage', body),
-  blindzone: (category, mode = 'walk', timeBudgetMin = 15, bbox = null, cellSizeDeg = 0.001, gridType = 'square', pointMode = true, maxPoints = 15000) =>
-    postJson('/blindzone', { category, mode, time_budget_min: timeBudgetMin, bbox, cell_size_deg: cellSizeDeg, grid_type: gridType, point_mode: pointMode, max_points: maxPoints }),
+  blindzone: (category, mode = 'walk', timeBudgetMin = 15, bbox = null, cellSizeDeg = 0.001, gridType = 'square', pointMode = true, maxPoints = 15000, tier = null) =>
+    postJson('/blindzone', { category, mode, time_budget_min: timeBudgetMin, bbox, cell_size_deg: cellSizeDeg, grid_type: gridType, point_mode: pointMode, max_points: maxPoints, tier }),
+  planningClosure: (poiIds, mode = 'walk', timeBudgetMin = 15, fallback = 30, otherCategory = null, tier = null, facilityIds = null) =>
+    postJson('/planning/closure', { poi_ids: poiIds, facility_ids: facilityIds, mode, time_budget_min: timeBudgetMin, fallback_time_min: fallback, other_category: otherCategory, tier }),
+  planningRelocation: (oldPoiId, newLat, newLng, mode = 'walk', timeBudgetMin = 15, oldFacilityId = null, tier = null) =>
+    postJson('/planning/relocation', { old_poi_id: oldPoiId, old_facility_id: oldFacilityId, new_lat: newLat, new_lng: newLng, mode, time_budget_min: timeBudgetMin, tier }),
+  planningSiteSelection: (category, mode = 'walk', timeBudgetMin = 15, bbox = null, nCandidates = 10, extraCandidates = [], auto = true) =>
+    postJson('/planning/site-selection', { category, mode, time_budget_min: timeBudgetMin, bbox, n_candidates: nCandidates, extra_candidates: extraCandidates, auto }),
   roads: (bounds, mode = 'all') => {
     const q = `minlng=${bounds.getWest()}&minlat=${bounds.getSouth()}` +
       `&maxlng=${bounds.getEast()}&maxlat=${bounds.getNorth()}&mode=${mode}`
     return getJson(`/roads?${q}`)
   },
+  populationStat: (bbox = null, polygon = null) =>
+    postJson('/population/stat', { bbox, polygon }),
+  populationResidential: (bbox = null, limit = 500) =>
+    postJson('/population/residential', { bbox, limit }),
 }
 
 // 地址取点: 优先用库内 address, 缺失时用高德逆地理编码

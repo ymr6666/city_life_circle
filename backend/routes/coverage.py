@@ -131,7 +131,8 @@ def blindzone():
             cell_size_deg=data.get('cell_size_deg', 0.01),
             grid_type=data.get('grid_type', 'square'),
             point_mode=bool(data.get('point_mode', False)),
-            max_points=int(data.get('max_points', 15000)))
+            max_points=int(data.get('max_points', 15000)),
+            tier=data.get('tier'))
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     if result is None:

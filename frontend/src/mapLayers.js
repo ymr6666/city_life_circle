@@ -328,6 +328,28 @@ export function popRamp(v) {
   return stops[stops.length - 1][1]
 }
 
+// 小区人口点色阶 (低值也保持饱和, 白底可见; 深橙→深红)
+// v: 0~1 (人口/maxPop)
+export function popDotRamp(v) {
+  const t = Math.max(0, Math.min(1, v))
+  const stops = [
+    [0.00, '#e6550d'],
+    [0.25, '#f03b20'],
+    [0.50, '#d7301f'],
+    [0.75, '#c7001a'],
+    [1.00, '#8c0020'],
+  ]
+  for (let i = 1; i < stops.length; i++) {
+    if (t <= stops[i][0]) {
+      const [t0, c0] = stops[i - 1]
+      const [t1, c1] = stops[i]
+      const k = (t - t0) / (t1 - t0 || 1)
+      return lerpColor(c0, c1, k)
+    }
+  }
+  return stops[stops.length - 1][1]
+}
+
 // 盲区色阶: 绿(全覆盖/无盲区) → 黄 → 红(高盲区率)
 // v: 盲区率 0~1 (1=该格完全无服务)
 export function blindRamp(v) {

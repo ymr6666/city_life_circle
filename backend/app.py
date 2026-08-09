@@ -8,6 +8,8 @@ from routes.grid import grid_bp
 from routes.regeo import regeo_bp
 from routes.tiles import tiles_bp
 from routes.coverage import coverage_bp
+from routes.planning import planning_bp
+from routes.population import population_bp
 
 
 def create_app():
@@ -21,6 +23,8 @@ def create_app():
     app.register_blueprint(regeo_bp)
     app.register_blueprint(tiles_bp)
     app.register_blueprint(coverage_bp)
+    app.register_blueprint(planning_bp)
+    app.register_blueprint(population_bp)
 
     # CORS: 允许前端 (file:// 打开 viewer.html 或其它域名) 跨域调用 API
     @app.after_request

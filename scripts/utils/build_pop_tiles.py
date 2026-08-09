@@ -118,10 +118,12 @@ def tile_bounds(z, x, y):
 def generate_tiles(zmin, zmax):
     import PIL.Image
     from PIL import Image
+    from rasterio.warp import reproject, Resampling as WarpResampling
     with rasterio.open(INTERMEDIATE) as ds:
         dst_bounds = (ds.bounds.left, ds.bounds.bottom, ds.bounds.right, ds.bounds.top)
         for z in range(zmin, zmax + 1):
             n = 2 ** z
+            w = 2 * WORLD / n
             x0 = int(math.floor((dst_bounds[0] + WORLD) / (2 * WORLD) * n))
             x1 = int(math.floor((dst_bounds[2] + WORLD) / (2 * WORLD) * n))
             y0 = int(math.floor((WORLD - dst_bounds[3]) / (2 * WORLD) * n))
@@ -130,9 +132,21 @@ def generate_tiles(zmin, zmax):
             for xt in range(x0, x1 + 1):
                 for yt in range(y0, y1 + 1):
                     left, bottom, right, top = tile_bounds(z, xt, yt)
-                    window = from_bounds(left, bottom, right, top, ds.transform)
-                    data = ds.read(1, window=window, out_shape=(TILE_SIZE, TILE_SIZE),
-                                   resampling=Resampling.bilinear)
+                    # 每张瓦片直接重投影到**标准瓦片网格** (origin=瓦片左上角,
+                    # 像素分辨率=瓦片地理宽/256), 保证与 OSM/天地图 XYZ 严格对齐,
+                    # 避免 from_bounds float 窗口亚像素漂移导致的缩放错位。
+                    res_px = (right - left) / TILE_SIZE
+                    dst_tf = rasterio.transform.from_origin(left, top, res_px, res_px)
+                    data = np.zeros((TILE_SIZE, TILE_SIZE), dtype="float32")
+                    reproject(
+                        source=rasterio.band(ds, 1),
+                        destination=data,
+                        src_transform=ds.transform,
+                        src_crs="EPSG:3857",
+                        dst_transform=dst_tf,
+                        dst_crs="EPSG:3857",
+                        resampling=WarpResampling.bilinear,
+                    )
                     rgba = colorize(data)
                     img = Image.fromarray(rgba, "RGBA")
                     d = TILE_DIR / str(z) / str(xt)
