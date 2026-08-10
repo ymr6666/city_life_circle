@@ -44,8 +44,6 @@ watch(tab, (v) => {
         <button :class="['tab', { active: tab === 'blindzone' }]" @click="tab = 'blindzone'">全城分析</button>
         <button :class="['tab', { active: tab === 'planning' }]" @click="tab = 'planning'">规划分析</button>
       </nav>
-      <div class="spacer"></div>
-      <div class="server-badge">API · localhost:5000</div>
     </header>
 
     <!-- 全局 loading -->
@@ -86,8 +84,6 @@ watch(tab, (v) => {
 }
 .tab:hover { background: var(--primary-light); color: var(--primary-dark); }
 .tab.active { background: var(--primary); color: #fff; font-weight: 600; }
-.spacer { flex: 1; }
-.server-badge { font-size: 11px; color: var(--text-3); border: 1px solid var(--border); padding: 3px 8px; border-radius: 20px; }
 .loading-mask {
   position: fixed; inset: 0; z-index: 5000;
   background: rgba(255,255,255,.72); backdrop-filter: blur(2px);
