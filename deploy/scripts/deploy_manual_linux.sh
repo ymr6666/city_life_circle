@@ -8,7 +8,25 @@
 # =====================================================================
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# 定位项目根目录: 优先环境变量, 否则从脚本所在位置向上找 (含 deploy/data/city_life_circle.dump 的目录)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -n "${CLC_PROJECT_DIR:-}" ]; then
+  PROJECT_DIR="$CLC_PROJECT_DIR"
+else
+  PROJECT_DIR="$SCRIPT_DIR"
+  while [ "$PROJECT_DIR" != "/" ]; do
+    if [ -f "$PROJECT_DIR/deploy/data/city_life_circle.dump" ] && [ -d "$PROJECT_DIR/backend" ]; then
+      break
+    fi
+    PROJECT_DIR="$(dirname "$PROJECT_DIR")"
+  done
+fi
+if [ ! -f "$PROJECT_DIR/deploy/data/city_life_circle.dump" ]; then
+  echo "[错误] 无法定位项目目录(需包含 deploy/data/city_life_circle.dump)。"
+  echo "       请把脚本放到项目内(如 city-life-circle/deploy/scripts/) 再运行,"
+  echo "       或用环境变量指定: CLC_PROJECT_DIR=/路径/city-life-circle bash deploy_manual_linux.sh"
+  exit 1
+fi
 echo "项目目录: $PROJECT_DIR"
 
 # ---- 0. 前置检查 ----
