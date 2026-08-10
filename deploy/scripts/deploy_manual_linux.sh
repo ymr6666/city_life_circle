@@ -59,9 +59,11 @@ sudo -u postgres psql -c "ALTER USER postgres PASSWORD '$DB_PASS';"
 if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" | grep -q 1; then
   sudo -u postgres createdb "$DB_NAME"
 fi
-sudo -u postgres pg_restore -d "$DB_NAME" --no-owner --no-privileges --clean --if-exists \
-  "$PROJECT_DIR/deploy/data/city_life_circle.dump" || echo "      [提示] pg_restore 有非致命警告(扩展/权限类), 继续"
+# 先建扩展(服务器可用版本), 再恢复 —— 否则 dump 里的 CREATE EXTENSION 在缺扩展时恢复会失败
 sudo -u postgres psql -d "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS postgis; CREATE EXTENSION IF NOT EXISTS pgrouting;" >/dev/null
+# 恢复失败立即退出(不再静默吞掉, 避免"空库假成功")
+sudo -u postgres pg_restore -d "$DB_NAME" --no-owner --no-privileges --clean --if-exists \
+  "$PROJECT_DIR/deploy/data/city_life_circle.dump"
 echo "      数据库恢复完成"
 
 # ---- 4. 人口瓦片 ----
