@@ -70,6 +70,14 @@ bash deploy/scripts/install_linux.sh
 bash deploy/scripts/start_linux.sh
 ```
 
+> **推荐：全自动一键脚本（Linux，不依赖 Docker，含 apt 装依赖→建库恢复→低配调优→systemd 服务）**
+>
+> ```bash
+> bash deploy/scripts/deploy_manual_linux.sh
+> ```
+> 适用于国内服务器（全程 apt/pip，不拉 Docker Hub）。卸载：
+> `sudo systemctl disable --now city-life-circle && rm -rf <项目目录>`。
+
 > 脚本会：创建 Python 虚拟环境并安装依赖 → 恢复数据库 → 复制人口瓦片 → （如无前端产物则执行 npm build）。
 > 若网络受限（评委无外网），请直接使用部署包内 **已构建好的 `frontend/dist`**，脚本会自动跳过 npm 构建。
 
