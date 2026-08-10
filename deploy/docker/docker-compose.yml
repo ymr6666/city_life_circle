@@ -1,0 +1,52 @@
+# 城市时域生活圈分析系统 - Docker Compose 云部署
+# 用法:
+#   1. 将 deploy/data 随部署包放在项目根目录下 (含 city_life_circle.dump 与 pop_tiles/)
+#   2. cd deploy/docker && docker compose up -d --build
+#   3. 访问 http://服务器IP:5000
+services:
+  db:
+    build:
+      context: .
+      dockerfile: Dockerfile.db
+    container_name: city-life-db
+    environment:
+      POSTGRES_DB: city_life_circle
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      # 首次启动自动建库并恢复全量备份 (数据卷已有数据时跳过)
+      - ./db_init:/docker-entrypoint-initdb.d:ro
+      - ../data/city_life_circle.dump:/docker-entrypoint-initdb.d/city_life_circle.dump:ro
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d city_life_circle"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  app:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.backend
+    container_name: city-life-app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      CLC_DB_HOST: db
+      CLC_DB_PORT: 5432
+      CLC_DB_NAME: city_life_circle
+      CLC_DB_USER: postgres
+      CLC_DB_PASSWORD: postgres
+      AMAP_KEY: ${AMAP_KEY:-}
+    volumes:
+      # 人口密度瓦片 (只读挂载, 避免打进镜像)
+      - ../data/pop_tiles:/app/cache/pop_tiles:ro
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+
+volumes:
+  db_data:

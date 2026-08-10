@@ -1,0 +1,22 @@
+# Docker 构建上下文忽略 (app 镜像的 context 为项目根目录)
+# 保留: backend/ frontend/dist/ docs/ deploy/docker/Dockerfile.backend
+.git
+_archive
+backups
+cache
+data
+deploy/data
+deploy/scripts
+shp
+node_modules
+**/node_modules
+**/__pycache__
+**/*.pyc
+frontend/node_modules
+frontend/src
+frontend/vite.log
+frontend/.env
+frontend/.env.*
+*.dump
+*.gpkg
+*.shp

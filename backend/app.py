@@ -1,4 +1,5 @@
-from flask import Flask
+from flask import Flask, send_from_directory
+from pathlib import Path
 from routes.isochrone import isochrone_bp
 from routes.geocode import geocode_bp
 from routes.poi_stat import poi_stat_bp
@@ -12,9 +13,21 @@ from routes.planning import planning_bp
 from routes.population import population_bp
 from routes.citywide import citywide_bp
 
+# 前端构建产物目录 (存在则后端直接托管, 无需 nginx; 本地一键运行)
+FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
+
 
 def create_app():
-    app = Flask(__name__)
+    static_folder = None
+    static_url_path = None
+    if FRONTEND_DIST.is_dir():
+        static_folder = str(FRONTEND_DIST / "assets")
+        static_url_path = "/assets"
+
+    app = Flask(__name__,
+                static_folder=static_folder,
+                static_url_path=static_url_path)
+
     app.register_blueprint(isochrone_bp)
     app.register_blueprint(geocode_bp)
     app.register_blueprint(poi_stat_bp)
@@ -36,9 +49,26 @@ def create_app():
         resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
         return resp
 
+    # 生产模式: 后端托管构建好的前端 (单页应用入口)
+    if FRONTEND_DIST.is_dir():
+        @app.route('/')
+        def index():
+            return send_from_directory(FRONTEND_DIST, 'index.html')
+
     return app
+
+
+def run_production(app, host='0.0.0.0', port=5000):
+    """生产运行: 优先 waitress (Windows/Linux 通用), 缺失时回退 Flask dev server。"""
+    try:
+        from waitress import serve
+        print(f"[serve] waitress on http://{host}:{port}")
+        serve(app, host=host, port=port, threads=8)
+    except ImportError:
+        print("[serve] waitress 未安装, 使用 Flask 开发服务器 (仅限演示/调试)")
+        app.run(host=host, port=port)
 
 
 if __name__ == '__main__':
     app = create_app()
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    run_production(app)

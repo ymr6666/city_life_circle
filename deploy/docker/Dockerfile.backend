@@ -1,0 +1,23 @@
+# 后端镜像: Python 3.11 + waitress, 内置前端构建产物, 同一进程托管 API + 页面
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# 先装依赖 (利用层缓存)
+COPY backend/requirements.txt /app/backend/requirements.txt
+RUN pip install --no-cache-dir -r /app/backend/requirements.txt
+
+# 后端源码 + 前端构建产物 (人口瓦片通过数据卷挂载, 见 docker-compose.yml)
+COPY backend/ /app/backend/
+COPY frontend/dist/ /app/frontend/dist/
+
+# 数据库连接默认走 compose 的 db 服务
+ENV CLC_DB_HOST=db \
+    CLC_DB_PORT=5432 \
+    CLC_DB_NAME=city_life_circle \
+    CLC_DB_USER=postgres \
+    CLC_DB_PASSWORD=postgres
+
+EXPOSE 5000
+WORKDIR /app/backend
+CMD ["python", "app.py"]
