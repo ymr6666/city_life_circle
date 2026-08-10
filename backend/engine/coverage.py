@@ -121,6 +121,69 @@ def _slice_thresholds(node_cost, thresholds, pop_by_node, cost_per_min=None):
     return out
 
 
+def point_curve(lat, lng, mode="walk", time_budgets=(5, 10, 15, 20, 30),
+                snap_radius_m=150):
+    """起点多阈值覆盖曲线: 一次 Dijkstra → 各时间阈值的人口/设施覆盖数。
+
+    语义: "从该点出发 T 分钟内能覆盖多少人口/设施" (正算, 前向 Dijkstra)。
+    用于等时圈"覆盖率-时间衰减曲线"图 (单次计算, 多阈值切片, 不重复跑)。
+
+    返回: {mode, origin, time_budgets, points:[{time_budget_min,
+           covered_population, reachable_facilities_count}]}
+    """
+    time_budgets = sorted(float(t) for t in time_budgets if t > 0)
+    if not time_budgets:
+        raise ValueError("time_budgets 必须为正数")
+    max_t = max(time_budgets)
+
+    layer = build_layer(mode)
+    # 正算 (swap=False): 从起点出发
+    is_transit = hasattr(layer, "_build_combined_edge_sql")
+    directed = bool(layer.directed)
+    edge_sql = layer._build_combined_edge_sql(swap=False) if is_transit \
+        else layer._edge_sql(swap=False)
+    budget = max_t if is_transit else layer.get_distance_budget(max_t)
+    cpm = 1.0 if is_transit else layer.speed_kmh * 1000.0 / 60.0
+
+    cands, _ = adaptive_snap(layer, lat, lng, snap_radius_m, 1)
+    if not cands:
+        return None
+    start_ids = [c["id"] for c in cands]
+    node_cost = _reverse_profile(edge_sql, start_ids, budget, directed)
+    if not node_cost:
+        return None
+
+    # 各阈值可达节点集
+    points = []
+    for t in time_budgets:
+        cost = t * cpm
+        nodes = [n for n, c in node_cost.items() if c <= cost]
+        pop_by_node = _population_by_node(nodes)
+        pop = sum(pop_by_node.values())
+        # 设施覆盖数: 可达节点上的 POI (walk 挂接)
+        fac_count = 0
+        if nodes:
+            phs = ','.join(['%s'] * len(nodes))
+            row = execute_one(f"""
+                SELECT count(DISTINCT p.id) FROM poi_road_nodes pn
+                JOIN hefei_poi p ON p.id = pn.poi_id
+                WHERE pn.mode = %s AND pn.node_id IN ({phs})
+            """, (layer.poi_mode, *nodes))
+            fac_count = int(row[0]) if row else 0
+        points.append({
+            "time_budget_min": t,
+            "covered_population": pop,
+            "reachable_facilities_count": fac_count,
+        })
+
+    return {
+        "mode": mode,
+        "origin": {"lat": lat, "lng": lng},
+        "time_budgets": time_budgets,
+        "points": points,
+    }
+
+
 def _edge_setup(layer, max_time_min):
     """复用 reverse.py 的边集/预算换算: 单模式成本=米, 耦合模式成本=分钟
 
@@ -930,22 +993,23 @@ def relocation_impact(old_poi_id=None, old_facility_id=None, new_lat=None,
 
 def site_selection(category, mode="walk", time_budget_min=15,
                    bbox=None, n_candidates=10, extra_candidates=None,
-                   w_fill=1.0, w_new=0.5, w_overlap=0.6, auto=True):
+                   auto=True):
     """选址模拟: 给定类别与范围, 找出最优新增设施候选点。
 
     候选点来源:
       1. 自动 (auto=True): bbox 内盲区中的需求点 (hefei_residential_nearest
-         小区, 优先盲区率高/人口多的小区), 取 Top n_candidates
+         小区), 取 Top n_candidates
       2. 手动: extra_candidates=[{lat,lng}] 用户指定候选点追加
 
-    每个候选点评分:
-      增量覆盖人口 fill_pop = 候选点覆盖 ∩ 当前盲区人口 (最重要: 填补盲区)
-      新增覆盖人口 new_pop  = 候选点覆盖 − 现有同类覆盖 (纯新增)
-      重叠人口   overlap_pop = 候选点覆盖 ∩ 现有同类覆盖 (与已有设施竞争)
-      评分 = fill_pop*w_fill + new_pop*w_new − overlap_pop*w_overlap
+    每个候选点指标:
+      覆盖人口 coverage_pop = 候选点覆盖人口
+      填补盲区 fill_pop = 候选点覆盖 ∩ 当前盲区人口 (选址核心目标)
+      重叠人口 overlap_pop = 候选点覆盖 ∩ 现有同类覆盖 (与已有设施竞争)
+
+    排序: 按填补盲区人口降序 (盲区为主), 同分按覆盖人口降序。
 
     返回: candidates 排序列表 [{lat,lng,coverage_population,fill_population,
-          new_population,overlap_population,score,source:'auto'|'manual'}]
+          overlap_population,source:'auto'|'manual'}]
     """
     import math
     bbox = bbox or [117.07, 31.68, 117.50, 32.07]
@@ -1037,22 +1101,49 @@ def site_selection(category, mode="walk", time_budget_min=15,
         fill_pop = sum(c_pop_by_node.get(n, 0) for n in fill_nodes)
         overlap_nodes = {n for n in c_nodes if n in exist_nodes}
         overlap_pop = sum(exist_pop_by_node.get(n, 0) for n in overlap_nodes)
-        score = fill_pop * w_fill + cov_pop * w_new - overlap_pop * w_overlap
         return {
             "lat": c["lat"], "lng": c["lng"],
             "name": c.get("name", ""),
             "poi_id": c.get("poi_id"),
+            "node_id": cid,
             "source": c["source"],
             "coverage_population": cov_pop,
             "fill_population": fill_pop,
             "overlap_population": overlap_pop,
-            "score": round(score, 1),
         }
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         results = [r for r in pool.map(_evaluate, candidates) if r]
 
-    results.sort(key=lambda r: -r["score"])
+    results.sort(key=lambda r: (-r["fill_population"], -r["coverage_population"]))
+    total_pop = total_population()
+
+    # 4. 多方案对比: 按推荐顺序依次新建前 k 个候选, 评估每档累计覆盖。
+    #    每档一次多源 Dijkstra (现有设施 + 前 k 个候选), 增量=相邻档差值,
+    #    直观反映"新建到第几座"的边际收益与最终覆盖率。
+    top = results[:max(1, min(int(n_candidates), 10))]
+    schemes = []
+    prev_pop = exist_pop
+    exist_node_ids = sorted(set(int(n) for n in exist_ids))
+    for k in range(0, len(top) + 1):
+        if k == 0:
+            pop = exist_pop
+            names = []
+        else:
+            sources = sorted(set(exist_node_ids) | {int(r["node_id"]) for r in top[:k]})
+            sc = _reverse_profile(edge_sql, sources, budget, directed)
+            pop = sum(_population_by_node(
+                [n for n, c in sc.items() if c <= threshold_cost]).values())
+            names = [r.get("name") or f"候选{i + 1}" for i, r in enumerate(top[:k])]
+        schemes.append({
+            "size": k,
+            "coverage_population": pop,
+            "incremental_population": (pop - prev_pop) if k else 0,
+            "coverage_rate": round(pop / total_pop, 4) if total_pop else 0,
+            "candidate_names": names,
+        })
+        prev_pop = pop
+
     return {
         "category": category,
         "mode": mode,
@@ -1062,7 +1153,8 @@ def site_selection(category, mode="walk", time_budget_min=15,
             "JOIN hefei_poi p ON p.id=pn.poi_id WHERE p.category=%s AND pn.mode='walk'",
             (category,)))),
         "exist_coverage_population": exist_pop,
-        "total_population": total_population(),
+        "total_population": total_pop,
         "candidates": results[:max(1, int(n_candidates))],
         "n_candidates": len(results),
+        "schemes": schemes,
     }

@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { api } from '../api'
 import { store } from '../store'
-import { clearOverlays, drawHexGrid, scoreRamp, classBreaksColor, setPickMode } from '../mapLayers'
+import { clearOverlays, drawHexGrid, scoreRamp, classBreaksColor, setPickMode, setCurrentPoint, clearCurrentPoint } from '../mapLayers'
 
 const status = ref('就绪')
 const centerLat = ref(store.pointLat)
@@ -103,6 +103,21 @@ function onMetricChange() {
 }
 watch(metric, onMetricChange)
 
+// 中心点标记: 进入分级色彩 Tab 时显示, 离开时清除
+watch(() => store.activeTab, (v) => {
+  if (v === 'choropleth') {
+    setCurrentPoint(centerLat.value, centerLng.value, '中心点')
+  } else {
+    clearCurrentPoint()
+  }
+})
+// 中心点变化 (选点) 时更新标记
+watch([centerLat, centerLng], () => {
+  if (store.activeTab === 'choropleth') {
+    setCurrentPoint(centerLat.value, centerLng.value, '中心点')
+  }
+})
+
 function onBreaksInput() {
   customBreaks = true
   updateLegend()
@@ -137,7 +152,10 @@ function exitPick() {
     pickListener = null
   }
 }
-onBeforeUnmount(exitPick)
+onBeforeUnmount(() => {
+  exitPick()
+  clearCurrentPoint()
+})
 onMounted(updateLegend)
 </script>
 

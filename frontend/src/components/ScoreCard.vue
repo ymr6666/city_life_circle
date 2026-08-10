@@ -10,26 +10,18 @@ const props = defineProps({
 const radarEl = ref(null)
 let chart = null
 
-function ensureChart() {
-  if (chart) return chart
-  if (!radarEl.value) return null
-  try {
-    chart = echarts.init(radarEl.value)
-  } catch (e) {
-    return null
-  }
-  return chart
-}
-
 function gradeClass(g) {
   return { 优: 'g-good', 良: 'g-mid', 中: 'g-low', 差: 'g-bad' }[g] || 'g-mid'
 }
 
 function render() {
-  const ch = ensureChart()
-  if (!ch || !props.score || !props.score.sub_scores) return
+  if (!radarEl.value || !props.score || !props.score.sub_scores) return
   const dims = Object.values(props.score.sub_scores)
-  ch.setOption({
+  // 每次重建实例: 规避 setOption 合并残留/容器重建导致的雷达错乱 (如切换家庭模式后)
+  if (chart) { chart.dispose(); chart = null }
+  chart = echarts.init(radarEl.value)
+  chart.resize()
+  chart.setOption({
     tooltip: { trigger: 'item' },
     radar: {
       indicator: dims.map((d) => ({ name: d.label, max: 100 })),
@@ -49,7 +41,7 @@ function render() {
         itemStyle: { color: '#1976d2' },
       }],
     }],
-  })
+  }, true)
 }
 
 onMounted(() => {
@@ -77,8 +69,9 @@ function factText(d) {
     const c = f.categories || {}
     const metro = c.metro != null ? c.metro : '—'
     const bus = c.bus != null ? c.bus : '—'
-    const nd = f.nearest_distance_m != null ? `${Math.round(f.nearest_distance_m)}m` : '—'
-    return `附近 ${metro} 地铁站 · ${bus} 公交站 | 最近站 ${nd}`
+    const dm = f.metro_distance_m != null ? `${Math.round(f.metro_distance_m)}m` : '—'
+    const db = f.bus_distance_m != null ? `${Math.round(f.bus_distance_m)}m` : '—'
+    return `附近 ${metro} 地铁站 · ${bus} 公交站 | 地铁 ${dm} · 公交 ${db}`
   }
   const cnt = f.weighted_count
   const nd = f.nearest_distance_m != null ? `${Math.round(f.nearest_distance_m)}m` : '—'
@@ -86,6 +79,9 @@ function factText(d) {
 }
 const DIM_LABEL = { medical: '医疗', education: '教育', shopping: '购物', leisure: '休闲', transit: '交通' }
 function labelOf(k) { return DIM_LABEL[k] || k }
+function modeLabel(m) {
+  return { walk: '步行', cycle: '骑行', drive: '驾车', 'walk+metro': '地铁', 'walk+bus': '公交', 'walk+metro+bus': '公交+地铁' }[m] || m
+}
 function familyLabel(f) {
   return { elderly: '有老人', child: '有小孩', 'elderly+child': '老人+小孩' }[f] || '无'
 }
@@ -103,6 +99,7 @@ function familyLabel(f) {
         </div>
         <div class="num" :class="scoreColor(score.score)">{{ score.score }}</div>
         <div class="unit">综合宜居分 / 100</div>
+        <div class="ref-note" v-if="score.score_mode">按 {{ modeLabel(score.score_mode) }} {{ score.score_time_budget_min }} 分钟生活圈评估</div>
       </div>
 
       <div class="facts-strip">
@@ -166,6 +163,7 @@ export default {
 .grade-desc { font-size: 12px; color: var(--text-3); }
 .total .num { font-size: 44px; font-weight: 700; line-height: 1.05; }
 .total .unit { color: var(--text-3); font-size: 12px; }
+.ref-note { color: var(--text-3); font-size: 11px; margin-top: 2px; }
 .facts-strip {
   display: flex; gap: 14px; flex-wrap: wrap; justify-content: center;
   padding: 7px 10px; background: #f6f9fc; border-radius: 8px;

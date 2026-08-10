@@ -19,7 +19,7 @@ time_budgets: 分钟列表 (默认 [5,10,15]); time_budget_min: 单个阈值 (C)
 from flask import Blueprint, request, jsonify
 
 from engine.coverage import (category_coverage, facility_coverage,
-                             exclusive_catchment, blindzone_grid)
+                             exclusive_catchment, blindzone_grid, point_curve)
 from engine.factory import parse_mode
 
 coverage_bp = Blueprint('coverage', __name__)
@@ -137,4 +137,40 @@ def blindzone():
         return jsonify({"error": str(e)}), 400
     if result is None:
         return jsonify({"error": f"类别 {category} 无挂接数据"}), 404
+    return jsonify(result)
+
+
+@coverage_bp.route('/api/coverage-curve', methods=['POST'])
+def coverage_curve():
+    """起点多阈值覆盖曲线: POST /api/coverage-curve
+
+    请求: {lat, lng, mode?, time_budgets?: [5,10,15,20,30], snap_radius_m?}
+    响应: {mode, origin, time_budgets,
+           points:[{time_budget_min, covered_population,
+                    reachable_facilities_count}]}
+    一次 Dijkstra 多阈值切片, 用于等时圈"覆盖率-时间衰减"图。
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "missing JSON body"}), 400
+    lat = data.get('lat')
+    lng = data.get('lng')
+    if lat is None or lng is None:
+        return jsonify({"error": "lat/lng 必填"}), 400
+    tb = data.get('time_budgets', [5, 10, 15, 20, 30])
+    if isinstance(tb, (int, float)):
+        tb = [float(tb)]
+    elif isinstance(tb, list):
+        tb = [float(t) for t in tb]
+    else:
+        return jsonify({"error": "time_budgets 非法"}), 400
+    try:
+        mode = _parse_mode(data)
+        result = point_curve(float(lat), float(lng), mode=mode,
+                             time_budgets=tb,
+                             snap_radius_m=data.get('snap_radius_m', 150))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    if result is None:
+        return jsonify({"error": "起点不可吸附"}), 404
     return jsonify(result)

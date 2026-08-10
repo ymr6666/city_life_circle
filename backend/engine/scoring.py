@@ -16,6 +16,10 @@
   dist_score  = 100 * max(0, 1 - 最近设施距离 / dist_cap)  # 邻近便利分
   sub_score   = 0.7 * count_score + 0.3 * dist_score
 综合分 = Σ (sub_score * weight) / Σ weight, 权重由用户值 × 家庭预设系数。
+
+交通维度 (transit) 单独处理: 以"最近站点距离"为核心——有地铁即便利
+(地铁主导、公交其次), 站点数量仅小幅加成; 避免"只数站点数量"导致
+周围有地铁的地区交通也被评成"一般"。
 """
 from engine.poi_stats import _haversine_m
 from services.database import execute_one
@@ -207,6 +211,9 @@ def collect_facts(result, lng, lat):
     facts["transit"]["nearest_distance_m"] = round(nearest, 0) if nearest else None
     facts["transit"]["nearest_category"] = "metro" \
         if (nearest is not None and d_metro is not None and d_metro <= nearest) else "bus"
+    # 单独的地铁/公交最近站距 (交通评分以距离为核心, 前端也用于展示)
+    facts["transit"]["metro_distance_m"] = round(d_metro, 0) if d_metro else None
+    facts["transit"]["bus_distance_m"] = round(d_bus, 0) if d_bus else None
 
     # 覆盖人口 (100m 人口栅格): 作为展示事实, 不参与评分
     import json
@@ -218,6 +225,35 @@ def collect_facts(result, lng, lat):
         "density_per_km2": dens,
     }
     return facts
+
+
+def _transit_score(f):
+    """交通评分: 以"最近站点距离"为核心——有地铁即便利 (地铁主导, 公交其次),
+    站点数量仅小幅加成, 避免"只数数量"导致有地铁地区被评低。
+
+    基准分 (距离越近越高):
+      地铁 ≤800m   90→80   (交通便利/优)
+      地铁 ≤1500m  75→65   (地铁较近/良)
+      仅公交 ≤400m 62→52   (公交便利/中)
+      仅公交 ≤900m 50→40   (公交可达)
+      其余         30      (交通一般/差)
+    加成: 800m 内地铁站 ×2 + 400m 内公交站 ×1, 至多 +10。
+    """
+    d_metro = f.get("metro_distance_m")
+    d_bus = f.get("bus_distance_m")
+    if d_metro is not None and d_metro <= 800:
+        base = 90.0 - (d_metro / 800.0) * 10.0
+    elif d_metro is not None and d_metro <= 1500:
+        base = 75.0 - ((d_metro - 800.0) / 700.0) * 10.0
+    elif d_bus is not None and d_bus <= 400:
+        base = 62.0 - (d_bus / 400.0) * 10.0
+    elif d_bus is not None and d_bus <= 900:
+        base = 50.0 - ((d_bus - 400.0) / 500.0) * 10.0
+    else:
+        base = 30.0
+    cats = f.get("categories") or {}
+    bonus = min(10.0, (cats.get("metro") or 0) * 2.0 + (cats.get("bus") or 0) * 1.0)
+    return min(100.0, round(base + bonus, 1))
 
 
 def score_facts(facts, weights=None, family="none"):
@@ -235,9 +271,8 @@ def score_facts(facts, weights=None, family="none"):
         else:
             dist_score = 100.0 * max(0.0, 1.0 - nd / DIM_DIST_CAPS[dim])
         if dim == "transit":
-            # 交通: 站距邻近 60% + 附近站数 40% (附近站数为步行可达范围内的站,
-            # 与出行模式无关, 避免模式差异导致误判)
-            sub_scores[dim] = round(0.6 * dist_score + 0.4 * count_score, 1)
+            # 交通: 距离为核心 (有地铁即便利), 见 _transit_score
+            sub_scores[dim] = _transit_score(f)
         else:
             sub_scores[dim] = round(0.7 * count_score + 0.3 * dist_score, 1)
 
@@ -252,12 +287,24 @@ def score_facts(facts, weights=None, family="none"):
     return sub_scores, overall
 
 
+# 宜居评分固定参照: 方式 + 时长。评分描述"点位自身的生活圈配套质量",
+# 与用户选择的出行方式/时长解耦——驾车/公交/长时间会显著放大可达范围,
+# 使"数量类"维度虚高 (质变), 因此一律用固定步行基准评估; mode/time 仅作展示。
+SCORE_REF_MODE = "walk"
+SCORE_REF_TIME_MIN = 15
+
+
 def compute_score(lat, lng, mode, time_budget_min, weights=None, family="none",
                   snap_radius_m=150, snap_max_nodes=1):
-    """完整评分: 跑等时圈 → 取事实 → 计分 → 返回可解释结果"""
+    """完整评分: 跑等时圈 → 取事实 → 计分 → 返回可解释结果。
+
+    评分参照固定为「步行 {SCORE_REF_TIME_MIN} 分钟」生活圈: 传入的 mode/time
+    保留在返回里仅作展示 (score_mode/score_time_budget_min 标明实际参照),
+    不参与评分, 保证驾车/公交/地铁/混合模式与不同时长下评分稳定。
+    """
     from engine.access_cache import reachability_cached
-    result = reachability_cached(lat, lng, mode, time_budget_min, snap_radius_m,
-                                 snap_max_nodes)
+    result = reachability_cached(lat, lng, SCORE_REF_MODE, SCORE_REF_TIME_MIN,
+                                 snap_radius_m, snap_max_nodes)
     if not result:
         return None
 
@@ -289,6 +336,8 @@ def compute_score(lat, lng, mode, time_budget_min, weights=None, family="none",
     return {
         "mode": mode,
         "time_budget_min": time_budget_min,
+        "score_mode": SCORE_REF_MODE,
+        "score_time_budget_min": SCORE_REF_TIME_MIN,
         "origin": {"lat": lat, "lng": lng},
         "score": overall,
         "grade": grade_of(overall),

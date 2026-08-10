@@ -31,6 +31,8 @@ def _resolve_key():
 
     用 importlib 按独立模块名加载, 避免与已加载的 backend/config.py (`from config import ...`)
     在 sys.modules 中冲突导致取错模块。
+    config.py 首行 `from poi_categories import ...` 要求其所在目录在 sys.path 中,
+    否则 ImportError 会被 except 吞掉导致 key 为 None。
     """
     key = os.environ.get("AMAP_KEY")
     if key:
@@ -38,7 +40,11 @@ def _resolve_key():
     try:
         cfg_file = Path(__file__).resolve().parents[2] / "scripts" / "crawlers" / "config.py"
         if cfg_file.is_file():
+            import sys
             import importlib.util
+            cfg_dir = str(cfg_file.parent)
+            if cfg_dir not in sys.path:
+                sys.path.insert(0, cfg_dir)
             spec = importlib.util.spec_from_file_location("_amap_crawlers_config", cfg_file)
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)

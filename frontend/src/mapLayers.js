@@ -62,25 +62,18 @@ function popupHtml(name, address, sub) {
 }
 
 // ---------- 当前位置常驻标记 ----------
-// 用 L.marker + divIcon (DOM 标记), 缩放/平移时必然跟随地图;
-// 永久 tooltip 在 preferCanvas 下定位不稳定, 弃用
-function pointDivIcon(color, label) {
-  const lbl = label ? `<div class="pt-lbl">${esc(label)}</div>` : ''
-  return L.divIcon({
-    className: 'pt-icon',
-    html: `<div class="pt-pin" style="background:${color}"></div>${lbl}`,
-    iconSize: [0, 0],
-    iconAnchor: [0, 0],
+// 分析点/当前位置: 纯 SVG circleMarker (颜色区分), 不挂常驻标签, 缩放/平移永不错位。
+function stableMarker(lat, lng, color, radius) {
+  return L.circleMarker([lat, lng], {
+    radius, color: '#fff', weight: 2, fillColor: color, fillOpacity: 0.95,
   })
 }
 
 export function setCurrentPoint(lat, lng, label) {
   clearCurrentPoint()
   if (!store.map) return
-  currentPointLayer = L.marker([lat, lng], {
-    icon: pointDivIcon('#e53935', label || ''),
-    zoomAnimation: false,   // 缩放时直接定位, 避免连续滚动的偏移
-  }).addTo(store.map)
+  currentPointLayer = stableMarker(lat, lng, '#e53935', 8)
+  currentPointLayer.addTo(store.map)
 }
 
 export function clearCurrentPoint() {
@@ -134,12 +127,9 @@ export function focusFacility(f) {
     .openOn(store.map)
 }
 
-// 带标签的标记 (分析点用, 随 clearOverlays 清除)
+// 带颜色的圆点标记 (分析点用, 随 clearOverlays 清除)
 export function addLabeledMarker(lat, lng, label, color) {
-  const mk = L.marker([lat, lng], {
-    icon: pointDivIcon(color, label),
-    zoomAnimation: false,   // 缩放时直接定位, 避免连续滚动的偏移
-  })
+  const mk = stableMarker(lat, lng, color, 7)
   addOverlay(mk)
   return mk
 }
@@ -184,26 +174,34 @@ export function drawIsochrone(d, opts = {}) {
 }
 
 // ---------- 反算覆盖/选址 ----------
+// 与正算一致: 覆盖圈/起点云用"方式色"(MODE_COLOR), 设施标记用分析点自身色 (同 P1/P2 标签); 交点=绿色最优选址
 export function drawReverse(d, opts = {}) {
   const fs = d.facilities || []
   const labels = opts.facilities || []
+  const modeColor = opts.modeColor || '#1565c0'
+  const pointColors = opts.pointColors || []
   fs.forEach((f, i) => {
     if (f.polygon) {
-      addGeoJson(f.polygon, {
-        color: '#1565c0', weight: 2, fillColor: '#1976d2', fillOpacity: 0.15,
-      })
+      addGeoJson(f.polygon, { color: modeColor, weight: 2, fillColor: modeColor, fillOpacity: 0.12 })
     }
-    // 设施标记 + 地址标签
+    // 可达起点点云 (抽样), 与正算点云同色 (方式色)
+    const origins = f.reachable_origins || []
+    if (origins.length) {
+      const step = Math.ceil(origins.length / 900)
+      addPointLayer(step > 1 ? origins.filter((_, k) => k % step === 0) : origins, modeColor, 2.5, 0.4)
+    }
+    // 设施标记: 用分析点自身颜色, 与 P1/P2 标签一致
     const info = labels[i] || {}
-    const mk = L.marker([f.lat, f.lng], {
-      icon: pointDivIcon('#1565c0', info.address || info.name || `设施 ${i + 1}`),
-      zoomAnimation: false,
-    })
+    const mk = L.circleMarker([f.lat, f.lng], {
+      radius: 7, color: '#fff', weight: 2, fillColor: pointColors[i] || modeColor, fillOpacity: 0.95,
+    }).bindTooltip(
+      `<b>${esc(info.address || info.name || `设施 ${i + 1}`)}</b><br/>覆盖 ${f.reachable_origins_count || 0} 个起点`,
+      { direction: 'top', opacity: 1 })
     addOverlay(mk)
   })
   if (d.intersection && d.intersection.polygon) {
     addGeoJson(d.intersection.polygon, {
-      color: '#2e7d32', weight: 2, fillColor: '#2e7d32', fillOpacity: 0.3,
+      color: '#2e7d32', weight: 2.5, fillColor: '#2e7d32', fillOpacity: 0.3,
     })
   }
 }

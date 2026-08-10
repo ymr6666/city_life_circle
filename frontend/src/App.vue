@@ -1,7 +1,7 @@
 <script setup>
 import { ref, watch } from 'vue'
 import { store } from './store'
-import { clearOverlays, clearRoads } from './mapLayers'
+import { clearOverlays, clearRoads, clearCurrentPoint } from './mapLayers'
 import MapView from './components/MapView.vue'
 import AnalysisView from './views/AnalysisView.vue'
 import ChoroplethView from './views/ChoroplethView.vue'
@@ -12,9 +12,10 @@ import PlanningView from './views/PlanningView.vue'
 const tab = ref('analysis')
 watch(tab, (v) => {
   store.activeTab = v
-  // 切换视图时清空上一视图的地图覆盖层
+  // 切换视图时清空上一视图的地图覆盖层与中心点标记
   clearOverlays()
   clearRoads()
+  clearCurrentPoint()
 })
 </script>
 

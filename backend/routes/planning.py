@@ -8,8 +8,7 @@
   POST /api/planning/relocation 搬迁影响: {old_poi_id, new_lat, new_lng,
                                 mode?, time_budget_min?, snap_radius_m?}
   POST /api/planning/site-selection  选址模拟: {category, mode?, time_budget_min?,
-                                bbox?, n_candidates?, extra_candidates?,
-                                w_fill?, w_new?, w_overlap?}
+                                bbox?, n_candidates?, extra_candidates?}
 """
 from flask import Blueprint, request, jsonify
 
@@ -103,9 +102,6 @@ def planning_site_selection():
             bbox=data.get('bbox'),
             n_candidates=data.get('n_candidates', 10),
             extra_candidates=data.get('extra_candidates'),
-            w_fill=data.get('w_fill', 1.0),
-            w_new=data.get('w_new', 0.5),
-            w_overlap=data.get('w_overlap', 0.6),
             auto=bool(data.get('auto', True)))
     except ValueError as e:
         return jsonify({"error": str(e)}), 400

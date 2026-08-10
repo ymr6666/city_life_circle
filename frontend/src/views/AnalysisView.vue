@@ -8,6 +8,8 @@ import {
 } from '../mapLayers'
 import StatsPanel from '../components/StatsPanel.vue'
 import ScoreCard from '../components/ScoreCard.vue'
+import ChartBox from '../components/ChartBox.vue'
+import { decayLineOption } from '../chartOptions'
 
 // ---------- 常量 ----------
 const MODES = [
@@ -30,6 +32,7 @@ const lng = ref(117.285)
 const addr = ref('')
 const searchText = ref('')
 const selectedModes = ref(['walk'])
+const lastMode = ref('walk')   // 最近一次勾选的出行方式 (反算/路网按此方式)
 const time = ref(15)
 const status = ref('')
 const rightTab = ref('stats')
@@ -38,18 +41,20 @@ const showPoints = ref(true)
 const showFacilities = ref(true)
 const weights = ref({ medical: 1, education: 1, shopping: 1, leisure: 1, transit: 1 })
 const family = ref('none')
-const reverseFacilities = ref([])
-const facilities = ref([])
 const lastReverse = ref(null)
 const pickMode = ref(false)
 const scoreLoading = ref(false)
-const reversePicking = ref(false)
+// 覆盖率-时间曲线
+const curveLoading = ref(false)
+const curve = ref(null)   // {points: [...]} 当前点当前模式
+const curveMode = ref(null)  // 曲线界面对应出行方式 (单选)
 
 // 分析点: {id, lat, lng, address, color, visible,
 //          results: {mode: {iso, stats, score}}, viewedMode}
 let nextPointId = 1
 const points = ref([])
 const activePointId = ref(null)
+let locationCleared = false   // 清空后切 Tab 不再重建"当前位置"残留点
 
 const activePoint = computed(() => points.value.find((p) => p.id === activePointId.value) || null)
 // 当前查看的模式 (用户选择或第一个有结果的方式)
@@ -126,6 +131,7 @@ function buildStats(iso) {
 }
 function setActivePoint(pt) {
   activePointId.value = pt.id
+  locationCleared = false
   lat.value = pt.lat
   lng.value = pt.lng
   addr.value = pt.address
@@ -139,15 +145,19 @@ function togglePointVisible(pt) { pt.visible = !pt.visible; redrawLayers() }
 function removePoint(pt) {
   const idx = points.value.indexOf(pt)
   if (idx >= 0) points.value.splice(idx, 1)
+  lastReverse.value = null   // 设施来自分析点, 移除后旧范围失效
   if (activePointId.value === pt.id) {
     activePointId.value = points.value[Math.max(0, idx - 1)]?.id || null
     if (activePoint.value) setCurrentPoint(activePoint.value.lat, activePoint.value.lng, activePoint.value.address)
+    else { clearCurrentPoint(); locationCleared = true }
   }
   redrawLayers()
 }
 function clearPoints() {
   points.value = []
   activePointId.value = null
+  locationCleared = true
+  lastReverse.value = null
   clearOverlays()
   clearCurrentPoint()
   statusText('已清空分析点')
@@ -158,6 +168,7 @@ function addPointFromCurrent() {
   let pt = findPoint(la, ln)
   if (!pt) pt = makePoint(la, ln)
   setActivePoint(pt)
+  redrawLayers()
   statusText(`已添加分析点 ${ptName(pt)}`)
 }
 
@@ -165,6 +176,7 @@ function addPointFromCurrent() {
 async function applyPoint(la, ln, keepActive = false) {
   lat.value = la
   lng.value = ln
+  locationCleared = false
   addr.value = ''
   store.pointLat = la
   store.pointLng = ln
@@ -176,6 +188,7 @@ async function applyPoint(la, ln, keepActive = false) {
   }
   const pt = findPoint(la, ln)
   activePointId.value = pt ? pt.id : (keepActive ? activePointId.value : null)
+  redrawLayers()
   statusText(`已定位：${addr.value || `${la.toFixed(6)}, ${ln.toFixed(6)}`}`)
 }
 
@@ -193,19 +206,13 @@ function enterPick() {
     const ll = store.map.mouseEventToLatLng(e)
     exitPick()
     if (ll) {
-      if (reversePicking.value) {
-        reversePicking.value = false
-        addReversePointAt(ll.lat, ll.lng)
-      } else {
-        applyPoint(+ll.lat.toFixed(6), +ll.lng.toFixed(6))
-      }
+      applyPoint(+ll.lat.toFixed(6), +ll.lng.toFixed(6))
     }
   }
   container.addEventListener('click', pickListener, true)
 }
 function exitPick() {
   pickMode.value = false
-  reversePicking.value = false
   setPickMode(false)
   if (pickListener) {
     store.map.getContainer().removeEventListener('click', pickListener, true)
@@ -214,7 +221,7 @@ function exitPick() {
 }
 function togglePick() {
   if (pickMode.value) { exitPick(); statusText('已退出选点模式') }
-  else { reversePicking.value = false; enterPick() }
+  else { enterPick() }
 }
 
 async function doGeocode() {
@@ -232,9 +239,13 @@ async function doGeocode() {
 function toggleMode(v) {
   const i = selectedModes.value.indexOf(v)
   if (i >= 0) {
-    if (selectedModes.value.length > 1) selectedModes.value.splice(i, 1)
+    if (selectedModes.value.length > 1) {
+      selectedModes.value.splice(i, 1)
+      if (lastMode.value === v) lastMode.value = selectedModes.value[selectedModes.value.length - 1]
+    }
   } else {
     selectedModes.value.push(v)
+    lastMode.value = v
   }
 }
 
@@ -243,27 +254,50 @@ function redrawLayers() {
   clearOverlays()
   points.value.forEach((pt) => {
     if (!pt.visible) return
-    // 仅渲染: 有 iso + 左栏已勾选该方式 + 未在右栏关闭
-    const modes = Object.keys(pt.results || {})
-      .filter((m) => pt.results[m] && pt.results[m].iso
-        && selectedModes.value.includes(m) && pt.modeVisible[m] !== false)
-    modes.forEach((m) => {
-      const isViewed = pt.id === activePointId.value && m === statsMode.value
-      drawIsochrone(pt.results[m].iso, {
-        color: MODE_COLOR[m],
-        showPoints: showPoints.value && isViewed,
-        showFacilities: showFacilities.value && isViewed,
-        outlineOnly: !isViewed,
+    try {
+      // 仅渲染: 有 iso + 左栏已勾选该方式 + 未在右栏关闭
+      const modes = Object.keys(pt.results || {})
+        .filter((m) => pt.results[m] && pt.results[m].iso
+          && selectedModes.value.includes(m) && pt.modeVisible[m] !== false)
+      modes.forEach((m) => {
+        const isViewed = pt.id === activePointId.value && m === statsMode.value
+        drawIsochrone(pt.results[m].iso, {
+          color: MODE_COLOR[m],
+          showPoints: showPoints.value && isViewed,
+          showFacilities: showFacilities.value && isViewed,
+          outlineOnly: !isViewed,
+        })
       })
-    })
-    if (pt.id !== activePointId.value) {
-      addLabeledMarker(pt.lat, pt.lng, ptName(pt), pt.color)
+      if (pt.id !== activePointId.value) {
+        addLabeledMarker(pt.lat, pt.lng, ptName(pt), pt.color)
+      }
+    } catch (e) {
+      console.error('[redrawLayers] 分析点绘制失败', ptName(pt), e)
     }
   })
-  if (lastReverse.value) drawReverse(lastReverse.value, { facilities: facilities.value })
+  if (lastReverse.value) {
+    try {
+      drawReverse(lastReverse.value, {
+        facilities: points.value.map((p) => ({ lat: p.lat, lng: p.lng, name: p.address || '', address: p.address || '' })),
+        pointColors: points.value.map((p) => p.color),
+        modeColor: MODE_COLOR[lastReverse.value.mode || 'walk'] || '#1976d2',
+      })
+    } catch (e) {
+      console.error('[redrawLayers] 反算范围绘制失败', e)
+    }
+  }
 }
 watch([showPoints, showFacilities], redrawLayers)
 watch(viewedMode, () => { if (rightTab.value === 'stats' || rightTab.value === 'score') redrawLayers() })
+// 切回分析页时重建中心点标记 (v-show 下 onMounted 不重跑)
+watch(() => store.activeTab, (v) => {
+  if (v === 'analysis') {
+    if (locationCleared) return
+    const pt = activePoint.value
+    if (pt) setCurrentPoint(pt.lat, pt.lng, pt.address)
+    else setCurrentPoint(lat.value, lng.value, addr.value)
+  }
+})
 
 // ---------- 正算 (多模式) ----------
 async function doIso() {
@@ -302,6 +336,43 @@ function setViewedMode(m) {
   if (rightTab.value === 'score') runScore(true)
   redrawLayers()
 }
+
+// 覆盖率-时间曲线: 对当前点指定方式, 一次多阈值计算
+async function loadCurve() {
+  const pt = activePoint.value
+  const available = Object.keys(pt?.results || {}).filter((k) => pt.results[k])
+  if (curveMode.value && !available.includes(curveMode.value)) curveMode.value = null
+  const m = curveMode.value || viewedMode.value
+  if (!pt || !m) return
+  curveLoading.value = true
+  const r = await api.coverageCurve(pt.lat, pt.lng, m)
+  curveLoading.value = false
+  if (r.ok && r.data && r.data.points) curve.value = r.data
+  else curve.value = null
+}
+
+// 曲线界面单选出行方式
+function setCurveMode(m) {
+  curveMode.value = m
+  curve.value = null
+  loadCurve()
+}
+// 切换分析点时重置曲线方式与数据
+watch(activePointId, () => { curveMode.value = null; curve.value = null })
+
+// 曲线图配置 (人口覆盖 + 设施覆盖 双轴)
+const curveOption = computed(() => {
+  if (!curve.value) return null
+  const pts = curve.value.points
+  const x = pts.map((p) => p.time_budget_min)
+  return decayLineOption({
+    x,
+    series: [
+      { name: '覆盖人口', data: pts.map((p) => p.covered_population), color: '#1976d2', area: true, yAxisIndex: 0 },
+      { name: '覆盖设施', data: pts.map((p) => p.reachable_facilities_count), color: '#f57c00', yAxisIndex: 1 },
+    ],
+  })
+})
 
 // 切换某交通方式缓冲区的显隐
 function toggleModeVisible(m) {
@@ -349,22 +420,17 @@ watch([weights, family], () => {
 }, { deep: true })
 
 // ---------- 反算选址 ----------
+// 反算设施 = 当前分析点 (统一用"＋ 设为分析点"选点, 点立即可见)
 async function doReverse() {
-  const list = reverseFacilities.value.length
-    ? reverseFacilities.value
-    : [{ lat: parseFloat(lat.value), lng: parseFloat(lng.value) }]
+  const list = points.value.length
+    ? points.value.map((p) => ({ lat: p.lat, lng: p.lng, name: p.address || '', address: p.address || '' }))
+    : [{ lat: parseFloat(lat.value), lng: parseFloat(lng.value), name: addr.value || '', address: addr.value || '' }]
   if (list.some((f) => isNaN(f.lat) || isNaN(f.lng))) { statusText('设施坐标非法'); return }
-  if (!reverseFacilities.value.length) {
-    reverseFacilities.value = [{
-      lat: parseFloat(lat.value), lng: parseFloat(lng.value),
-      name: addr.value || '', address: addr.value || '',
-    }]
-    updateFacilityList()
-  }
   clearOverlays()
-  statusText(`反算 ${list.length} 个设施覆盖范围…`)
+  const rmode = modeForReverse()
+  statusText(`反算 ${list.length} 个设施覆盖范围（${MODE_LABEL[rmode]}）…`)
   store.loading = true; store.loadingMsg = '反算覆盖范围'
-  const r = await api.reverse(list, modeForReverse(), time.value)
+  const r = await api.reverse(list, rmode, time.value)
   store.loading = false
   if (!r.ok) { statusText(`反算失败: ${r.data.error || r.status}`); return }
   lastReverse.value = r.data
@@ -375,33 +441,11 @@ async function doReverse() {
     (inter ? ` | 最优选址 ${inter.reachable_origins_count} 起点 / 覆盖 ${fmtPop(inter.reachable_population)}人` : ''))
 }
 function modeForReverse() {
-  // 反算用第一个勾选的方式 (优先单模式保证速度)
-  const single = selectedModes.value.find((m) => !m.includes('+'))
-  return single || selectedModes.value[0] || 'walk'
+  // 反算/路网用最近一次勾选的出行方式, 与"出行方式"选择一致 (不再总是回退步行)
+  if (selectedModes.value.includes(lastMode.value)) return lastMode.value
+  return selectedModes.value[0] || 'walk'
 }
-function addCurrentAsFacility() {
-  const la = parseFloat(lat.value), ln = parseFloat(lng.value)
-  if (isNaN(la) || isNaN(ln)) { statusText('当前坐标非法'); return }
-  addReversePointAt(la, ln)
-}
-async function addReversePointAt(la, ln) {
-  let address = ''
-  const r = await api.regeo(la, ln)
-  if (r.ok && r.data && r.data.address) address = r.data.address
-  reverseFacilities.value.push({ lat: la, lng: ln, name: address, address })
-  updateFacilityList()
-  statusText(`已添加设施：${address || `${la.toFixed(5)}, ${ln.toFixed(5)}`}`)
-}
-function startReversePick() {
-  reversePicking.value = true
-  enterPick()
-  statusText('选点模式：点击地图添加设施点')
-}
-function removeFacility(i) { reverseFacilities.value.splice(i, 1); updateFacilityList() }
-function clearFacilities() { reverseFacilities.value = []; updateFacilityList() }
-function updateFacilityList() {
-  facilities.value = reverseFacilities.value.map((f, i) => ({ i, ...f }))
-}
+const reverseModeLabel = computed(() => MODE_LABEL[modeForReverse()] || '')
 
 // ---------- 对比表 ----------
 const comparePoints = computed(() => points.value.filter((p) => Object.values(p.results || {}).some((r) => r)))
@@ -491,6 +535,7 @@ onBeforeUnmount(() => {
             <span>分析点 ({{ points.length }})</span>
             <button class="link-btn" @click="clearPoints">清空</button>
           </div>
+          <div class="pt-items">
           <div v-for="(pt, i) in points" :key="pt.id"
                :class="['pt-item', { active: pt.id === activePointId, dim: !pt.visible }]">
             <span class="pt-color" :style="{ background: pt.color }"
@@ -503,6 +548,7 @@ onBeforeUnmount(() => {
               <button class="link-btn" @click.stop="rightTab = 'stats'; setActivePoint(pt)">结果</button>
               <button class="link-btn" @click.stop="removePoint(pt)">×</button>
             </span>
+          </div>
           </div>
         </div>
         <div class="hint" v-if="!points.length">添加多个分析点，可分别生成生活圈并同图对比</div>
@@ -530,14 +576,15 @@ onBeforeUnmount(() => {
         </div>
         <div class="hint mode-hint">勾选多种方式 → 生成不同颜色范围线同图对比</div>
       </section>
-    </aside>
 
-    <!-- 右侧结果面板 (操作 + 结果集中在此) -->
-    <aside class="panel right">
-      <div class="tabs">
+      <!-- 结果 (合并到左侧面板, 减少视线移动) -->
+      <section class="sec">
+        <div class="sec-title">结果</div>
+        <div class="tabs">
         <button class="tab" :class="{ active: rightTab === 'stats' }" @click="rightTab = 'stats'">设施统计</button>
         <button class="tab" :class="{ active: rightTab === 'score' }" @click="rightTab = 'score'">宜居评分</button>
         <button class="tab" :class="{ active: rightTab === 'reverse' }" @click="rightTab = 'reverse'">反算选址</button>
+        <button class="tab" :class="{ active: rightTab === 'curve' }" @click="rightTab = 'curve'; loadCurve()">覆盖率曲线</button>
       </div>
 
       <div class="tab-body">
@@ -558,20 +605,8 @@ onBeforeUnmount(() => {
           <StatsPanel :stats="stats" />
         </template>
 
-        <!-- 宜居评分: 权重+按钮+卡片 同屏 -->
+        <!-- 宜居评分: 权重+按钮+卡片 同屏 (评分固定步行15分钟, 无需模式选择) -->
         <div v-else-if="rightTab === 'score'">
-          <div v-if="resultModes.length" class="mode-chips">
-            <div v-for="rm in resultModes" :key="rm.m"
-                 :class="['mode-chip', { active: rm.m === viewedMode, off: !isModeVisible(rm.m) }]">
-              <span class="chip-check" @click="toggleModeVisible(rm.m)"
-                    :title="isModeVisible(rm.m) ? '隐藏该方式缓冲区' : '显示该方式缓冲区'">
-                <span class="ckbox">{{ isModeVisible(rm.m) ? '✓' : '' }}</span>
-              </span>
-              <span class="chip-main" @click="setViewedMode(rm.m)" :title="'查看 ' + rm.label + ' 的统计/评分'">
-                <span class="chip-dot" :style="{ background: rm.color }"></span>{{ rm.label }}
-              </span>
-            </div>
-          </div>
           <div class="score-tools">
             <div class="weight-grid">
               <div class="weight-row" v-for="(v, k) in weights" :key="k">
@@ -595,26 +630,39 @@ onBeforeUnmount(() => {
           <ScoreCard :score="score" :loading="scoreLoading" />
         </div>
 
-        <!-- 反算选址: 设施+按钮+结果 同屏 -->
-        <div v-else class="reverse-tab">
-          <div class="rev-head">
-            <div class="rev-title">设施清单（能同时覆盖全部设施的区域 = 最优选址）</div>
-            <div class="row">
-              <button class="btn" @click="addCurrentAsFacility">+ 添加当前点</button>
-              <button class="btn" @click="startReversePick">地图选点</button>
-              <button class="btn" v-if="facilities.length" @click="clearFacilities">清空</button>
-            </div>
-          </div>
-          <div class="fac-list">
-            <div v-for="f in facilities" :key="f.i" class="fac-item">
-              <div class="fac-info">
-                <div class="fac-name">{{ f.address || '未命名点' }}</div>
-                <div class="fac-coord">{{ f.lat.toFixed(5) }}, {{ f.lng.toFixed(5) }}</div>
+        <!-- 覆盖率-时间曲线 -->
+        <div v-else-if="rightTab === 'curve'">
+          <div class="hint" v-if="!activePoint || !viewedMode">请先生成生活圈，再查看覆盖率随时间衰减曲线。</div>
+          <template v-else>
+            <div class="mode-chips" v-if="resultModes.length">
+              <div v-for="rm in resultModes" :key="rm.m"
+                   :class="['mode-chip', { active: rm.m === (curveMode || viewedMode) }]">
+                <span class="chip-main" @click="setCurveMode(rm.m)" :title="'查看 ' + rm.label + ' 的覆盖率曲线'">
+                  <span class="chip-dot" :style="{ background: rm.color }"></span>{{ rm.label }}
+                </span>
               </div>
-              <button class="link-btn" @click="removeFacility(f.i)">×</button>
             </div>
+            <div class="hint" style="margin-bottom:6px">
+              从 <b>{{ activePoint.address || activePoint.lat.toFixed(4) + ',' + activePoint.lng.toFixed(4) }}</b>
+              出发 · <b>{{ MODE_LABEL[curveMode || viewedMode] }}</b>
+              <span v-if="curveLoading"> 计算中…</span>
+            </div>
+            <ChartBox :option="curveOption" height="230px"
+                      :empty-text="curveLoading ? '计算中…' : '暂无数据，请先生成生活圈'" />
+            <div class="hint" v-if="curve && curve.points">
+              人口覆盖：5min {{ (curve.points[0]?.covered_population || 0).toLocaleString() }} →
+              {{ (curve.points[curve.points.length - 1]?.covered_population || 0).toLocaleString() }}
+              （{{ curve.points[curve.points.length - 1]?.time_budget_min }}min）
+            </div>
+          </template>
+        </div>
+
+        <!-- 反算选址: 以分析点为设施 -->
+        <div v-else-if="rightTab === 'reverse'" class="reverse-tab">
+          <div class="rev-head">
+            <div class="rev-title">反算选址：以<b>分析点</b>作为设施，求同时能覆盖全部设施的最优选址区</div>
+            <div class="hint" style="margin-top:4px">当前分析点 <b>{{ points.length }}</b> 个（左侧「＋ 设为分析点」添加，点会显示在地图上）。按最近勾选的出行方式：<b>{{ reverseModeLabel }}</b>。</div>
           </div>
-          <div v-if="!facilities.length" class="hint">添加 1 个设施 = 它的覆盖范围；≥2 个设施 = 能同时覆盖全部设施的最优选址区。反算使用当前勾选的出行方式。</div>
           <button class="btn primary big" @click="doReverse" :disabled="store.loading">计算覆盖 / 选址</button>
           <div v-if="lastReverse" class="rev-result">
             <div v-for="(f, i) in lastReverse.facilities" :key="i" class="rev-line">
@@ -626,6 +674,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </div>
+      </section>
     </aside>
 
     <!-- 多地点对比 -->
@@ -662,8 +711,7 @@ onBeforeUnmount(() => {
   padding: 12px; max-height: calc(100% - 90px); overflow-y: auto;
   pointer-events: auto;
 }
-.panel.left { left: 12px; width: 300px; }
-.panel.right { right: 12px; width: 340px; }
+.panel.left { left: 12px; width: 320px; }
 
 .sec { margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
 .sec:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
@@ -681,6 +729,7 @@ onBeforeUnmount(() => {
 .grow { flex: 1; min-width: 0; }
 
 .pt-list { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
+.pt-items { display: flex; flex-direction: column; gap: 4px; max-height: 150px; overflow-y: auto; }
 .pt-head { display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; color: var(--text-3); margin-bottom: 2px; }
 .pt-item {
   display: flex; align-items: center; gap: 7px;
@@ -730,7 +779,7 @@ onBeforeUnmount(() => {
 .tab { border: none; background: none; padding: 6px 12px; font-size: 13px; color: var(--text-2); border-bottom: 2px solid transparent; cursor: pointer; }
 .tab:hover { color: var(--primary); }
 .tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
-.tab-body { overflow-y: auto; max-height: calc(100vh - 160px); }
+.tab-body { overflow-y: auto; max-height: 300px; }
 
 .mode-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
 .mode-chip {
@@ -759,10 +808,6 @@ onBeforeUnmount(() => {
 
 .reverse-tab .rev-head { margin-bottom: 8px; }
 .rev-title { font-size: 12px; color: var(--text-2); margin-bottom: 6px; line-height: 1.5; }
-.fac-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
-.fac-item { display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--border); border-radius: 7px; padding: 6px 9px; }
-.fac-name { font-size: 12px; color: var(--text); line-height: 1.4; }
-.fac-coord { font-size: 11px; color: var(--text-3); font-family: Consolas, monospace; }
 .rev-result { margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
 .rev-line { font-size: 12px; color: var(--text-2); display: flex; align-items: center; gap: 6px; }
 .rev-no { width: 18px; height: 18px; border-radius: 50%; background: var(--primary); color: #fff; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }

@@ -32,6 +32,8 @@ export const api = {
   grid: (bbox, cellSizeDeg = 0.01, metric = 'score', category = null, gridType = 'hex') =>
     postJson('/grid', { bbox, cell_size_deg: cellSizeDeg, metric, category, grid_type: gridType }),
   coverage: (body) => postJson('/coverage', body),
+  coverageCurve: (lat, lng, mode, timeBudgets = [5, 10, 15, 20, 30]) =>
+    postJson('/coverage-curve', { lat, lng, mode, time_budgets: timeBudgets }),
   blindzone: (category, mode = 'walk', timeBudgetMin = 15, bbox = null, cellSizeDeg = 0.001, gridType = 'square', pointMode = true, maxPoints = 15000, tier = null) =>
     postJson('/blindzone', { category, mode, time_budget_min: timeBudgetMin, bbox, cell_size_deg: cellSizeDeg, grid_type: gridType, point_mode: pointMode, max_points: maxPoints, tier }),
   planningClosure: (poiIds, mode = 'walk', timeBudgetMin = 15, fallback = 30, otherCategory = null, tier = null, facilityIds = null) =>

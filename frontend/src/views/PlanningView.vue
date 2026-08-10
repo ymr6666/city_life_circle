@@ -1,9 +1,11 @@
 <script setup>
-import { ref, watch, onBeforeUnmount } from 'vue'
+import { ref, watch, computed, onBeforeUnmount } from 'vue'
 import L from 'leaflet'
 import { api } from '../api'
 import { store } from '../store'
 import { clearOverlays, addOverlay, addGeoJson, setPickMode } from '../mapLayers'
+import ChartBox from '../components/ChartBox.vue'
+import { waterfallOption, stackedBarOption, siteBarOption, schemeCompareOption } from '../chartOptions'
 
 const status = ref('就绪')
 const subtab = ref('site')      // site / closure / relocation
@@ -13,7 +15,7 @@ const timeBudget = ref(15)
 const radiusKm = ref(6)
 const centerLat = ref(store.pointLat)
 const centerLng = ref(store.pointLng)
-const nCandidates = ref(8)
+const nCandidates = ref(3)
 const picking = ref(false)
 const pickFor = ref(null)
 const loading = ref(false)
@@ -47,6 +49,8 @@ const relocNew = ref(null)
 // 选址
 const extraCands = ref([])
 const activeCandIdx = ref(-1)       // 当前高亮候选
+let manualPins = []                  // 手动候选地图标记 (可单独删除)
+let facMarkers = new Map()           // 范围内设施标记 {id: marker} (选中高亮)
 
 const CATS = [
   { v: 'hospital', l: '医院' }, { v: 'supermarket', l: '超市' }, { v: 'pharmacy', l: '药店' },
@@ -121,18 +125,42 @@ function renderRange() {
     })
   }
 
-  // 范围内设施点 (橙色, 可点击; 关闭/搬迁模式下点击即选中)
+  // 范围内设施点 (橙色, 可点击选中; 悬浮显示信息; 关闭/搬迁模式下点击即选中)
+  facMarkers = new Map()
   rangeFacilities.value.forEach((f, i) => {
     const mk = L.circleMarker([f.lat, f.lng], {
       radius: 6, color: '#fff', weight: 1.5, fillColor: '#e65100', fillOpacity: 0.95,
-    }).bindPopup(
+    }).bindTooltip(
       `<div class="pop-pop"><div class="pp-title">${f.name || '(未命名)'}</div>` +
       `${f.address ? `地址 <b>${f.address}</b><br/>` : ''}` +
       `${f.rating ? `评分 <b>${f.rating}</b><br/>` : ''}` +
       `类型 <b>${catLabel()}</b><br/>` +
-      `(第 ${i + 1} 个, id=${f.id})</div>`, { maxWidth: 300 })
+      `(第 ${i + 1} 个, id=${f.id})</div>`,
+      { direction: 'top', offset: [0, -8], opacity: 1, maxWidth: 280 })
     mk.on('click', () => onFacilityClick(f))
     addOverlay(mk)
+    facMarkers.set(f.id, mk)
+  })
+  syncFacilityHighlights()
+  renderManualPins()
+}
+
+// 手动候选标记渲染 (随 clearOverlays 重建)
+function renderManualPins() {
+  manualPins.forEach((p) => p.remove())
+  manualPins = []
+  extraCands.value.forEach((c) => {
+    manualPins.push(renderFacilityPin(c, '#7b1fa2', c.name))
+  })
+}
+
+// 关闭目标设施高亮同步 (地图标记红显)
+function syncFacilityHighlights() {
+  facMarkers.forEach((mk, id) => {
+    const picked = closeTargets.value.some((x) => x.id === id)
+    mk.setStyle(picked
+      ? { radius: 8, color: '#d32f2f', weight: 2.5, fillColor: '#d32f2f', fillOpacity: 0.95 }
+      : { radius: 6, color: '#fff', weight: 1.5, fillColor: '#e65100', fillOpacity: 0.95 })
   })
 }
 
@@ -237,8 +265,7 @@ function renderSiteCands(list) {
       `<div class="pop-pop"><div class="pp-title">${i + 1}. ${c.name || '候选点'}</div>` +
       `覆盖人口 <b>${c.coverage_population.toLocaleString()}</b><br/>` +
       `填补盲区 <b style="color:#d32f2f">${c.fill_population.toLocaleString()}</b><br/>` +
-      `重叠 <b>${c.overlap_population.toLocaleString()}</b><br/>` +
-      `评分 <b>${c.score}</b></div>`, { maxWidth: 280 })
+      `重叠 <b>${c.overlap_population.toLocaleString()}</b></div>`, { maxWidth: 280 })
     mk.on('click', () => selectCandidate(i))
     addOverlay(mk)
     candMarkers.push(mk)
@@ -276,7 +303,7 @@ function addManualCandidate() {
         return
       }
       extraCands.value.push({ lat: +ll.lat.toFixed(6), lng: +ll.lng.toFixed(6), name: `手动候选${extraCands.value.length + 1}` })
-      renderFacilityPin({ lat: ll.lat, lng: ll.lng, name: `手动候选${extraCands.value.length}`, address: '' }, '#7b1fa2')
+      renderManualPins()
       status.value = `已添加候选 (${ll.lat.toFixed(5)}, ${ll.lng.toFixed(5)})，共 ${extraCands.value.length} 个手动候选`
     }
   }
@@ -284,11 +311,26 @@ function addManualCandidate() {
   container.addEventListener('click', listener, true)
 }
 
+// 单独移除某个手动候选 (地图标记同步删除)
+function removeManualCandidate(idx) {
+  const pin = manualPins[idx]
+  if (pin) { pin.remove(); manualPins.splice(idx, 1) }
+  extraCands.value.splice(idx, 1)
+  status.value = `已移除手动候选，剩 ${extraCands.value.length} 个`
+}
+
+function clearManualCands() {
+  extraCands.value = []
+  renderManualPins()
+  status.value = '已清空手动候选'
+}
+
 // ---------- 关闭影响 ----------
 function toggleCloseTarget(f) {
   const idx = closeTargets.value.findIndex((x) => x.id === f.id)
   if (idx >= 0) closeTargets.value.splice(idx, 1)
   else closeTargets.value.push({ ...f })
+  syncFacilityHighlights()
 }
 
 async function runClosure() {
@@ -302,7 +344,6 @@ async function runClosure() {
   if (!r.ok) { status.value = `关闭影响失败: ${r.data.error || r.status}`; return }
   clearOverlays()
   renderRange()
-  closeTargets.value.forEach((f) => renderFacilityPin(f, '#d32f2f', '评估目标'))
   if (r.data.polygon) {
     addGeoJson(r.data.polygon, { color: '#d32f2f', weight: 2, fillColor: '#d32f2f', fillOpacity: 0.25 })
   }
@@ -392,6 +433,8 @@ function onClear() {
   rangeFacilities.value = []
   rangeMeta.value = null
   activeCandIdx.value = -1
+  manualPins = []
+  facMarkers = new Map()
   status.value = '就绪'
 }
 
@@ -412,6 +455,54 @@ function exitPick() {
 onBeforeUnmount(exitPick)
 
 function fmtN(v) { return (v || 0).toLocaleString() }
+
+// 搬迁影响瀑布图: 受影响 → +恢复 → +新增 → 净变化
+const relocWaterfallOption = computed(() => {
+  const r = result.value
+  if (!r || r.net_change === undefined) return null
+  const items = [
+    { name: '受影响', value: r.affected_population, type: 'base' },
+    { name: '恢复', value: r.recovered_population, type: 'add' },
+    { name: '新增覆盖', value: r.added_population, type: 'add' },
+    { name: '净变化', value: r.net_change, type: 'base' },
+  ]
+  return waterfallOption({ title: '搬迁净影响（人）', items })
+})
+
+// 关闭影响条形图: 受影响 = 退级 + 完全失去
+const closureStackOption = computed(() => {
+  const r = result.value
+  if (!r || r.affected_population === undefined) return null
+  return stackedBarOption({
+    title: '关闭影响（人）',
+    items: [{
+      name: '受影响',
+      downgraded: r.downgraded_population || 0,
+      lost: r.lost_population || 0,
+    }],
+  })
+})
+
+// 选址候选评分柱状图
+const siteBarOptionComputed = computed(() => {
+  const r = result.value
+  if (!r || !r.candidates || !r.candidates.length) return null
+  return siteBarOption({ items: r.candidates.slice(0, 10) })
+})
+
+// 选址多方案对比: 现状 → 按推荐顺序依次新建, 累计覆盖人口 + 本轮新增人口
+const schemeCompareComputed = computed(() => {
+  const r = result.value
+  if (!r || !r.schemes || !r.schemes.length) return null
+  return schemeCompareOption({
+    items: r.schemes.map((s, i) => ({
+      name: i === 0 ? '现状' : `新建${i}座`,
+      coverage_population: s.coverage_population,
+      incremental_population: s.incremental_population,
+      coverage_rate: s.coverage_rate,
+    })),
+  })
+})
 </script>
 
 <template>
@@ -484,7 +575,14 @@ function fmtN(v) { return (v || 0).toLocaleString() }
         <div class="row" v-if="extraCands.length">
           <span class="lbl">手动</span>
           <span class="grow hint-inline">{{ extraCands.length }} 个手动候选</span>
-          <button class="btn" @click="extraCands = []">清空</button>
+          <button class="btn" @click="clearManualCands()">清空</button>
+        </div>
+        <div class="manual-list" v-if="extraCands.length">
+          <div v-for="(c, i) in extraCands" :key="i" class="manual-item">
+            <span class="m-name">{{ c.name }}</span>
+            <span class="m-coord">({{ c.lat.toFixed(5) }}, {{ c.lng.toFixed(5) }})</span>
+            <button class="m-del" title="移除该候选" @click="removeManualCandidate(i)">×</button>
+          </div>
         </div>
         <div class="row">
           <button class="btn primary grow" @click="runSiteSelection">生成选址推荐</button>
@@ -494,20 +592,22 @@ function fmtN(v) { return (v || 0).toLocaleString() }
           <button class="btn grow" :class="{ active: picking && pickFor === 'site' }" @click="picking ? exitPick() : addManualCandidate()">手动加候选点</button>
           <button class="btn" :disabled="!extraCands.length" @click="runManualEval">计算效果</button>
         </div>
-        <div class="hint">盲区参考已加载（红=盲区/黄=紧张/绿=覆盖）。自动生成范围内候选，可手动补点。评分 = 填补盲区×1 + 覆盖×0.5 − 重叠×0.6。点击候选卡片可在地图定位。</div>
+        <div class="hint">盲区参考已加载（红=盲区/黄=紧张/绿=覆盖）。自动生成范围内候选，可手动补点。按填补盲区人口降序排序（同分按覆盖人口）。点击候选卡片可在地图定位。</div>
 
         <div class="result-list" v-if="result && result.candidates">
           <div v-for="(c, i) in result.candidates" :key="i"
-               class="r-item" :class="{ top: i === 0, active: i === activeCandIdx }"
+               class="r-item" :class="{ top: i === 0 && activeCandIdx < 0, active: i === activeCandIdx }"
                @click="selectCandidate(i)">
             <span class="r-rank">{{ i + 1 }}</span>
             <div class="r-main">
               <div class="r-name">{{ c.name }} <em>{{ c.source === 'manual' ? '·手动' : '' }}</em></div>
               <div class="r-meta">覆盖 {{ fmtN(c.coverage_population) }} · 填补 {{ fmtN(c.fill_population) }} · 重叠 {{ fmtN(c.overlap_population) }}</div>
             </div>
-            <span class="r-score">{{ c.score }}</span>
           </div>
         </div>
+        <ChartBox v-if="siteBarOptionComputed" :option="siteBarOptionComputed" height="180px" />
+        <div class="hint" style="margin-top:6px">多方案对比：柱=累计覆盖人口（左轴），线=本轮新增人口（右轴），标注覆盖率。逐档显示"新建到第N座"的边际收益。</div>
+        <ChartBox v-if="schemeCompareComputed" :option="schemeCompareComputed" height="210px" />
       </template>
 
       <!-- 关闭影响 -->
@@ -540,7 +640,8 @@ function fmtN(v) { return (v || 0).toLocaleString() }
           <div class="stat"><span>退级</span><b>{{ fmtN(result.downgraded_population) }}</b></div>
           <div class="stat"><span>替代设施</span><b>{{ result.replacement_facilities.length }}</b></div>
         </div>
-        <div class="hint">在列表中勾选或<b>点击地图上的橙色设施点</b>选择要评估的设施。红区=受影响（独占覆盖），绿点=替代设施。</div>
+        <ChartBox v-if="closureStackOption" :option="closureStackOption" height="160px" />
+        <div class="hint">在列表中勾选或<b>点击地图上的橙色设施点</b>选择要评估的设施（选中的点会红显，悬浮可查看信息）。红区=受影响（独占覆盖），绿点=替代设施。</div>
       </template>
 
       <!-- 搬迁影响 -->
@@ -575,6 +676,7 @@ function fmtN(v) { return (v || 0).toLocaleString() }
           <div class="stat"><span>新增覆盖</span><b>{{ fmtN(result.added_population) }}</b></div>
           <div class="stat"><span>净变化</span><b :style="{ color: result.net_change >= 0 ? '#2e7d32' : '#d32f2f' }">{{ result.net_change > 0 ? '+' : '' }}{{ fmtN(result.net_change) }}</b></div>
         </div>
+        <ChartBox v-if="relocWaterfallOption" :option="relocWaterfallOption" height="180px" />
         <div class="hint">点击<b>地图上的橙色设施点</b>或列表选择旧设施，再选新址。红=受影响区，绿=恢复区，蓝=新增覆盖。净变化 = 恢复 + 新增 − 受影响。</div>
       </template>
     </aside>
@@ -615,6 +717,12 @@ function fmtN(v) { return (v || 0).toLocaleString() }
 .btn.active { background: var(--primary); border-color: var(--primary); color: #fff; }
 .hint { color: var(--text-3); font-size: 11.5px; line-height: 1.6; }
 .hint-inline { color: var(--text-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.manual-list { max-height: 110px; overflow-y: auto; margin-bottom: 6px; }
+.manual-item { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 3px; font-size: 11.5px; }
+.m-name { color: var(--text); font-weight: 600; flex-shrink: 0; }
+.m-coord { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.m-del { border: none; background: transparent; color: var(--text-3); font-size: 14px; cursor: pointer; padding: 0 2px; line-height: 1; }
+.m-del:hover { color: #d32f2f; }
 .range-info { border: 1px solid var(--primary-light); background: var(--primary-light); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; }
 .ri-line { display: flex; justify-content: space-between; font-size: 12px; padding: 1px 0; }
 .ri-line span { color: var(--text-2); }

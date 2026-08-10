@@ -96,15 +96,18 @@ onMounted(() => {
   map.createPane('roads')
   map.getPane('roads').style.zIndex = 200
 
-  // 缩放过程中隐藏覆盖层(缓冲区/点/标记/路网), 完成后显示 —— 避免与底图动画错位
+  // 缩放动画期间隐藏覆盖层(缓冲区/点/标记/路网), 完成后显示 —— 避免与底图动画错位
   const hidePanes = () => {
-    ;['overlayPane', 'markerPane', 'roads'].forEach((n) => map.getPane(n)?.classList.add('zoom-hide'))
+    ;['overlayPane', 'markerPane', 'tooltipPane', 'roads'].forEach((n) => map.getPane(n)?.classList.add('zoom-hide'))
   }
   const showPanes = () => {
-    ;['overlayPane', 'markerPane', 'roads'].forEach((n) => map.getPane(n)?.classList.remove('zoom-hide'))
+    ;['overlayPane', 'markerPane', 'tooltipPane', 'roads'].forEach((n) => map.getPane(n)?.classList.remove('zoom-hide'))
   }
   map.on('zoomstart', hidePanes)
   map.on('zoomend', showPanes)
+  // 触屏捏合缩放: zoomstart 触发但 zoomend 可能不触发(Leaflet 事件不对称),
+  // 结束时靠 moveend 兜底恢复覆盖层可见, 否则所有叠加形状永久隐藏
+  map.on('moveend', showPanes)
 
   store.popLayer = popLayer
   store.map = map
