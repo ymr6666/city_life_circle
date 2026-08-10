@@ -51,6 +51,10 @@ deploy/data/
 city-life-circle-*.zip
 frontend-dist-*.zip
 
+# 本地提交/打包工作目录 (不上传 GitHub, 自行压缩提交)
+提交版本/
+~$*
+
 # Docker 真实密钥 (模板 deploy/docker/.env.example 可提交)
 deploy/docker/.env
 deploy/docker/.env.local
