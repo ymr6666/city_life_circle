@@ -991,9 +991,46 @@ def relocation_impact(old_poi_id=None, old_facility_id=None, new_lat=None,
     return result
 
 
+def _approx_dist_m(a, b):
+    """候选点间近似距离 (米)"""
+    dy = (a["lat"] - b["lat"]) * 111000
+    dx = (a["lng"] - b["lng"]) * 94000
+    return (dx * dx + dy * dy) ** 0.5
+
+
+def _diverse_top(results, n, min_dist_m=800):
+    """选址推荐去重: 优先不同盲区簇 + 距离下限, 避免前几名扎堆同一片盲区。
+
+    results: 按填补盲区人口降序; 返回最多 n 个, 保留"尽量靠前的不同区域候选"。
+    约束: 跳过与已选同簇 / 距已选任一点 < min_dist 的候选; 不足 n 个时按原序补足。
+    """
+    if n <= 1:
+        return results[:n]
+    picked = []
+    used_clusters = set()
+    for r in results:
+        if len(picked) >= n:
+            break
+        cid = r.get("cluster_id")
+        if cid is not None and cid in used_clusters:
+            continue
+        if any(_approx_dist_m(r, p) < min_dist_m for p in picked):
+            continue
+        picked.append(r)
+        if cid is not None:
+            used_clusters.add(cid)
+    if len(picked) < n:
+        for r in results:
+            if len(picked) >= n:
+                break
+            if r not in picked:
+                picked.append(r)
+    return picked
+
+
 def site_selection(category, mode="walk", time_budget_min=15,
                    bbox=None, n_candidates=10, extra_candidates=None,
-                   auto=True):
+                   auto=True, tier=None):
     """选址模拟: 给定类别与范围, 找出最优新增设施候选点。
 
     候选点来源:
@@ -1006,10 +1043,16 @@ def site_selection(category, mode="walk", time_budget_min=15,
       填补盲区 fill_pop = 候选点覆盖 ∩ 当前盲区人口 (选址核心目标)
       重叠人口 overlap_pop = 候选点覆盖 ∩ 现有同类覆盖 (与已有设施竞争)
 
-    排序: 按填补盲区人口降序 (盲区为主), 同分按覆盖人口降序。
+    全城指标回灌 (tier 过滤后):
+      cluster_population = 候选点所在盲区簇人口 (0=不在任何簇)
+      mismatch_index     = 候选点所在错配格的 z 分数差 (None=格网外)
+
+    排序: 按填补盲区人口降序 (盲区为主), 同分按覆盖人口降序;
+    推荐: 在前序基础上按盲区簇去重 + 800m 距离下限, 让前 N 名分散到不同盲区。
 
     返回: candidates 排序列表 [{lat,lng,coverage_population,fill_population,
-          overlap_population,source:'auto'|'manual'}]
+          overlap_population,cluster_population,mismatch_index,
+          source:'auto'|'manual'}]
     """
     import math
     bbox = bbox or [117.07, 31.68, 117.50, 32.07]
@@ -1024,13 +1067,14 @@ def site_selection(category, mode="walk", time_budget_min=15,
     edge_sql, directed, ok_column, edge_cost_sql, budget, cpm = _edge_setup(layer, t)
     threshold_cost = t * cpm
 
-    # 1. 现有同类设施成本剖面 (用于增量/重叠判定)
-    rows = execute_query("""
+    # 1. 现有同类设施成本剖面 (按等级过滤, 用于增量/重叠判定)
+    where, where_params = _category_facility_filter(category, tier)
+    rows = execute_query(f"""
         SELECT DISTINCT pn.node_id
         FROM poi_road_nodes pn
         JOIN hefei_poi p ON p.id = pn.poi_id
-        WHERE p.category = %s AND pn.mode='walk'
-    """, (category,))
+        WHERE {where} AND pn.mode='walk'
+    """, (*where_params,))
     exist_ids = _start_ids_from_nodes([r[0] for r in rows])
     if not exist_ids:
         return None
@@ -1081,36 +1125,46 @@ def site_selection(category, mode="walk", time_budget_min=15,
             keep.append(c)
     candidates = keep
 
+    # 候选数上限: 超大范围时均匀抽样, 避免数百次 Dijkstra 过慢/超时
+    MAX_EVAL = 800
+    if len(candidates) > MAX_EVAL:
+        _step = len(candidates) / float(MAX_EVAL)
+        candidates = [candidates[int(i * _step)] for i in range(MAX_EVAL)]
+
     # 3. 逐候选点评分 (并发: 候选点彼此独立, 连接池支持多线程)
     from concurrent.futures import ThreadPoolExecutor
 
     def _evaluate(c):
-        cands, _ = adaptive_snap(layer, c["lat"], c["lng"], 150, 1)
-        if not cands:
+        # 单个候选失败只跳过该点, 不拖垮整次推荐 (偶发 DB 连接抖动等)
+        try:
+            cands, _ = adaptive_snap(layer, c["lat"], c["lng"], 150, 1)
+            if not cands:
+                return None
+            cid = cands[0]["id"]
+            cc = _reverse_profile(edge_sql, [cid], budget, directed)
+            if not cc:
+                return None
+            c_nodes = {n for n, cost in cc.items() if cost <= threshold_cost}
+            if not c_nodes:
+                return None
+            c_pop_by_node = _population_by_node(list(c_nodes))
+            cov_pop = sum(c_pop_by_node.values())
+            fill_nodes = {n for n in c_nodes if n not in exist_nodes}
+            fill_pop = sum(c_pop_by_node.get(n, 0) for n in fill_nodes)
+            overlap_nodes = {n for n in c_nodes if n in exist_nodes}
+            overlap_pop = sum(exist_pop_by_node.get(n, 0) for n in overlap_nodes)
+            return {
+                "lat": c["lat"], "lng": c["lng"],
+                "name": c.get("name", ""),
+                "poi_id": c.get("poi_id"),
+                "node_id": cid,
+                "source": c["source"],
+                "coverage_population": cov_pop,
+                "fill_population": fill_pop,
+                "overlap_population": overlap_pop,
+            }
+        except Exception:
             return None
-        cid = cands[0]["id"]
-        cc = _reverse_profile(edge_sql, [cid], budget, directed)
-        if not cc:
-            return None
-        c_nodes = {n for n, cost in cc.items() if cost <= threshold_cost}
-        if not c_nodes:
-            return None
-        c_pop_by_node = _population_by_node(list(c_nodes))
-        cov_pop = sum(c_pop_by_node.values())
-        fill_nodes = {n for n in c_nodes if n not in exist_nodes}
-        fill_pop = sum(c_pop_by_node.get(n, 0) for n in fill_nodes)
-        overlap_nodes = {n for n in c_nodes if n in exist_nodes}
-        overlap_pop = sum(exist_pop_by_node.get(n, 0) for n in overlap_nodes)
-        return {
-            "lat": c["lat"], "lng": c["lng"],
-            "name": c.get("name", ""),
-            "poi_id": c.get("poi_id"),
-            "node_id": cid,
-            "source": c["source"],
-            "coverage_population": cov_pop,
-            "fill_population": fill_pop,
-            "overlap_population": overlap_pop,
-        }
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         results = [r for r in pool.map(_evaluate, candidates) if r]
@@ -1118,10 +1172,43 @@ def site_selection(category, mode="walk", time_budget_min=15,
     results.sort(key=lambda r: (-r["fill_population"], -r["coverage_population"]))
     total_pop = total_population()
 
+    # 3b. 全城指标回灌: 盲区簇人口 + 错配指数 (复用上面的 exist_cost 剖面,
+    #     免去重复全城 Dijkstra; 主线程执行, 避免线程内共用连接)
+    from engine.citywide import cluster_assign_from_profile, mismatch_grid, cell_ij_for_point
+    clusters = []
+    mm_map = {}
+    try:
+        clusters = cluster_assign_from_profile(
+            exist_cost, threshold_cost, bbox, min_points=3, top_n=50) or []
+        mm = mismatch_grid(category, tier=tier, bbox=bbox, cell_size_deg=0.01)
+        mm_map = {(f["properties"]["i"], f["properties"]["j"]): f["properties"]
+                  for f in (mm["features"] or [])} if mm else {}
+    except Exception:
+        clusters, mm_map = [], []
+    for r in results:
+        lng, lat = r["lng"], r["lat"]
+        cpop, cid = 0, None
+        for cl in clusters:
+            b = cl["bbox"]
+            if b[0] <= lng <= b[2] and b[1] <= lat <= b[3] and cl["population"] > cpop:
+                cpop, cid = cl["population"], cl["id"]
+        r["cluster_id"] = cid
+        r["cluster_population"] = cpop
+        m_idx = None
+        try:
+            ij = cell_ij_for_point(0.01, bbox, lng, lat)
+            if ij and ij in mm_map:
+                m_idx = mm_map[ij]["mismatch"]
+        except Exception:
+            m_idx = None
+        r["mismatch_index"] = m_idx
+
     # 4. 多方案对比: 按推荐顺序依次新建前 k 个候选, 评估每档累计覆盖。
     #    每档一次多源 Dijkstra (现有设施 + 前 k 个候选), 增量=相邻档差值,
     #    直观反映"新建到第几座"的边际收益与最终覆盖率。
-    top = results[:max(1, min(int(n_candidates), 10))]
+    #    推荐顺序: 先按填补盲区人口降序, 再按盲区簇去重 + 距离下限 (分散选址)。
+    recommended = _diverse_top(results, max(1, int(n_candidates)))
+    top = recommended[:max(1, min(int(n_candidates), 10))]
     schemes = []
     prev_pop = exist_pop
     exist_node_ids = sorted(set(int(n) for n in exist_ids))
@@ -1154,7 +1241,7 @@ def site_selection(category, mode="walk", time_budget_min=15,
             (category,)))),
         "exist_coverage_population": exist_pop,
         "total_population": total_pop,
-        "candidates": results[:max(1, int(n_candidates))],
+        "candidates": recommended,
         "n_candidates": len(results),
         "schemes": schemes,
     }

@@ -102,9 +102,12 @@ def planning_site_selection():
             bbox=data.get('bbox'),
             n_candidates=data.get('n_candidates', 10),
             extra_candidates=data.get('extra_candidates'),
-            auto=bool(data.get('auto', True)))
+            auto=bool(data.get('auto', True)),
+            tier=data.get('tier'))
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": f"选址计算失败: {type(e).__name__}: {e}"}), 500
     if result is None:
         return jsonify({"error": f"类别 {category} 无数据"}), 404
     return jsonify(result)

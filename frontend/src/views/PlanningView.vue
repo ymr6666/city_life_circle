@@ -114,7 +114,7 @@ function renderRange() {
   if (rangeBlind.value.length) {
     const bl = addGeoJson(blindFC, (f) => {
       const c = tierColor[f.properties.tier] || '#1a9850'
-      return { color: 'rgba(0,0,0,0)', weight: 0, fillColor: c, fillOpacity: f.properties.tier === '盲区' ? 0.40 : 0.15 }
+      return { color: 'rgba(0,0,0,0)', weight: 0, fillColor: c, fillOpacity: f.properties.tier === '盲区' ? 0.55 : 0.25 }
     }, { pointToLayer: (f, ll) => L.circleMarker(ll, { radius: 3 }) })
     bl.eachLayer((ly) => {
       const p = ly.feature.properties
@@ -223,7 +223,7 @@ async function runSiteSelection() {
   loading.value = true
   status.value = `选址分析 ${catLabel()} ${timeBudget.value}min…`
   const r = await api.planningSiteSelection(
-    category.value, mode.value, timeBudget.value, currentBBox(), nCandidates.value, extraCands.value)
+    category.value, mode.value, timeBudget.value, currentBBox(), nCandidates.value, extraCands.value, true, tier.value)
   loading.value = false
   if (!r.ok) { status.value = `选址失败: ${r.data.error || r.status}`; return }
   clearOverlays()
@@ -242,7 +242,7 @@ async function runManualEval() {
   loading.value = true
   status.value = `计算 ${extraCands.value.length} 个手动候选效果…`
   const r = await api.planningSiteSelection(
-    category.value, mode.value, timeBudget.value, currentBBox(), extraCands.value.length, extraCands.value, false)
+    category.value, mode.value, timeBudget.value, currentBBox(), extraCands.value.length, extraCands.value, false, tier.value)
   loading.value = false
   if (!r.ok) { status.value = `计算失败: ${r.data.error || r.status}`; return }
   clearOverlays()
@@ -257,7 +257,7 @@ let candMarkers = []
 function renderSiteCands(list) {
   candMarkers = []
   list.forEach((c, i) => {
-    const color = i === activeCandIdx.value ? '#d32f2f' : (i < 3 ? '#f57c00' : '#90a4ae')
+    const color = i === activeCandIdx.value ? '#d32f2f' : (i < 3 ? '#00838f' : '#90a4ae')
     const mk = L.circleMarker([c.lat, c.lng], {
       radius: i === activeCandIdx.value ? 10 : 8, color: '#fff', weight: 1.5,
       fillColor: color, fillOpacity: 0.95,
@@ -265,7 +265,10 @@ function renderSiteCands(list) {
       `<div class="pop-pop"><div class="pp-title">${i + 1}. ${c.name || '候选点'}</div>` +
       `覆盖人口 <b>${c.coverage_population.toLocaleString()}</b><br/>` +
       `填补盲区 <b style="color:#d32f2f">${c.fill_population.toLocaleString()}</b><br/>` +
-      `重叠 <b>${c.overlap_population.toLocaleString()}</b></div>`, { maxWidth: 280 })
+      `重叠 <b>${c.overlap_population.toLocaleString()}</b><br/>` +
+      `${c.cluster_population ? `盲区簇 #${c.cluster_id} 人口 <b>${c.cluster_population.toLocaleString()}</b><br/>` : ''}` +
+      `${c.mismatch_index != null ? `错配指数 <b>${c.mismatch_index}</b><br/>` : ''}` +
+      `</div>`, { maxWidth: 280 })
     mk.on('click', () => selectCandidate(i))
     addOverlay(mk)
     candMarkers.push(mk)
@@ -592,7 +595,7 @@ const schemeCompareComputed = computed(() => {
           <button class="btn grow" :class="{ active: picking && pickFor === 'site' }" @click="picking ? exitPick() : addManualCandidate()">手动加候选点</button>
           <button class="btn" :disabled="!extraCands.length" @click="runManualEval">计算效果</button>
         </div>
-        <div class="hint">盲区参考已加载（红=盲区/黄=紧张/绿=覆盖）。自动生成范围内候选，可手动补点。按填补盲区人口降序排序（同分按覆盖人口）。点击候选卡片可在地图定位。</div>
+        <div class="hint">盲区参考已加载（红=盲区/黄=紧张/绿=覆盖）。自动生成范围内候选，可手动补点。按填补盲区人口降序，且推荐分散到不同盲区簇（同簇/过近自动跳过）。点击候选卡片可在地图定位。</div>
 
         <div class="result-list" v-if="result && result.candidates">
           <div v-for="(c, i) in result.candidates" :key="i"
@@ -601,7 +604,10 @@ const schemeCompareComputed = computed(() => {
             <span class="r-rank">{{ i + 1 }}</span>
             <div class="r-main">
               <div class="r-name">{{ c.name }} <em>{{ c.source === 'manual' ? '·手动' : '' }}</em></div>
-              <div class="r-meta">覆盖 {{ fmtN(c.coverage_population) }} · 填补 {{ fmtN(c.fill_population) }} · 重叠 {{ fmtN(c.overlap_population) }}</div>
+              <div class="r-meta">覆盖 {{ fmtN(c.coverage_population) }} · 填补 {{ fmtN(c.fill_population) }} · 重叠 {{ fmtN(c.overlap_population) }}
+              <template v-if="c.cluster_population"> · 簇{{ fmtN(c.cluster_population) }}</template>
+              <template v-if="c.mismatch_index != null"> · 错配{{ c.mismatch_index > 0 ? '+' : '' }}{{ c.mismatch_index }}</template>
+            </div>
             </div>
           </div>
         </div>

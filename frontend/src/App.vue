@@ -41,7 +41,7 @@ watch(tab, (v) => {
         <button :class="['tab', { active: tab === 'analysis' }]" @click="tab = 'analysis'">生活圈分析</button>
         <button :class="['tab', { active: tab === 'choropleth' }]" @click="tab = 'choropleth'">分级色彩</button>
         <button :class="['tab', { active: tab === 'population' }]" @click="tab = 'population'">人口分布</button>
-        <button :class="['tab', { active: tab === 'blindzone' }]" @click="tab = 'blindzone'">服务盲区</button>
+        <button :class="['tab', { active: tab === 'blindzone' }]" @click="tab = 'blindzone'">全城分析</button>
         <button :class="['tab', { active: tab === 'planning' }]" @click="tab = 'planning'">规划分析</button>
       </nav>
       <div class="spacer"></div>

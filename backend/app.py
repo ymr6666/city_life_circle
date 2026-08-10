@@ -10,6 +10,7 @@ from routes.tiles import tiles_bp
 from routes.coverage import coverage_bp
 from routes.planning import planning_bp
 from routes.population import population_bp
+from routes.citywide import citywide_bp
 
 
 def create_app():
@@ -25,8 +26,9 @@ def create_app():
     app.register_blueprint(coverage_bp)
     app.register_blueprint(planning_bp)
     app.register_blueprint(population_bp)
+    app.register_blueprint(citywide_bp)
 
-    # CORS: 允许前端 (file:// 打开 viewer.html 或其它域名) 跨域调用 API
+    # CORS: 允许前端开发服务器/部署域名跨域调用 API
     @app.after_request
     def add_cors_headers(resp):
         resp.headers['Access-Control-Allow-Origin'] = '*'

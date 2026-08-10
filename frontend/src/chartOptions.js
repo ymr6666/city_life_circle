@@ -42,6 +42,22 @@ function baseYAxis(extra = {}) {
   }
 }
 
+// 均衡分析: 覆盖率随时间的条形图
+export function coverageRateOption({ items }) {
+  // items: [{time_budget_min, coverage_rate}]
+  return {
+    tooltip: { ...baseTooltip, trigger: 'axis', valueFormatter: (v) => (v == null ? '—' : (v * 100).toFixed(1) + '%') },
+    grid: baseGrid(),
+    xAxis: baseXAxis(items.map((i) => i.time_budget_min + 'min')),
+    yAxis: { ...baseYAxis(), max: 1, axisLabel: { color: AXIS_COLOR, fontSize: 11, formatter: (v) => (v * 100) + '%' } },
+    series: [{
+      type: 'bar', barWidth: '55%',
+      data: items.map((i) => ({ value: i.coverage_rate, itemStyle: { color: PRIM, borderRadius: [3, 3, 0, 0] } })),
+      label: { show: true, position: 'top', formatter: (p) => (p.value * 100).toFixed(0) + '%', color: '#455a64', fontSize: 11 },
+    }],
+  }
+}
+
 // 覆盖率/设施数 - 时间衰减曲线 (等时圈多次调用)
 // 人口与设施量级差异大, 用双坐标轴: 左轴=人口, 右轴=设施
 export function decayLineOption({ x, series, unit = '' }) {

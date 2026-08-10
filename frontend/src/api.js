@@ -40,8 +40,8 @@ export const api = {
     postJson('/planning/closure', { poi_ids: poiIds, facility_ids: facilityIds, mode, time_budget_min: timeBudgetMin, fallback_time_min: fallback, other_category: otherCategory, tier }),
   planningRelocation: (oldPoiId, newLat, newLng, mode = 'walk', timeBudgetMin = 15, oldFacilityId = null, tier = null) =>
     postJson('/planning/relocation', { old_poi_id: oldPoiId, old_facility_id: oldFacilityId, new_lat: newLat, new_lng: newLng, mode, time_budget_min: timeBudgetMin, tier }),
-  planningSiteSelection: (category, mode = 'walk', timeBudgetMin = 15, bbox = null, nCandidates = 10, extraCandidates = [], auto = true) =>
-    postJson('/planning/site-selection', { category, mode, time_budget_min: timeBudgetMin, bbox, n_candidates: nCandidates, extra_candidates: extraCandidates, auto }),
+  planningSiteSelection: (category, mode = 'walk', timeBudgetMin = 15, bbox = null, nCandidates = 10, extraCandidates = [], auto = true, tier = null) =>
+    postJson('/planning/site-selection', { category, mode, time_budget_min: timeBudgetMin, bbox, n_candidates: nCandidates, extra_candidates: extraCandidates, auto, tier }),
   roads: (bounds, mode = 'all') => {
     const q = `minlng=${bounds.getWest()}&minlat=${bounds.getSouth()}` +
       `&maxlng=${bounds.getEast()}&maxlat=${bounds.getNorth()}&mode=${mode}`
@@ -51,6 +51,12 @@ export const api = {
     postJson('/population/stat', { bbox, polygon }),
   populationResidential: (bbox = null, limit = 500) =>
     postJson('/population/residential', { bbox, limit }),
+  citywideClusters: (category, mode = 'walk', timeBudgetMin = 15, bbox = null, tier = null, clusterCellDeg = 0.0025, minPoints = 5, topN = 20, connectivity = 4) =>
+    postJson('/citywide/clusters', { category, mode, time_budget_min: timeBudgetMin, bbox, tier, cluster_cell_deg: clusterCellDeg, min_points: minPoints, top_n: topN, connectivity }),
+  citywideMismatch: (category, bbox = null, tier = null, cellSizeDeg = 0.01, gridType = 'hex') =>
+    postJson('/citywide/mismatch', { category, bbox, tier, cell_size_deg: cellSizeDeg, grid_type: gridType }),
+  citywideBalance: (category, mode = 'walk', timeBudgetMin = 15, bbox = null, tier = null) =>
+    postJson('/citywide/balance', { category, mode, time_budget_min: timeBudgetMin, bbox, tier }),
 }
 
 // 地址取点: 优先用库内 address, 缺失时用高德逆地理编码

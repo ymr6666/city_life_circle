@@ -371,6 +371,13 @@ export function blindRamp(v) {
   return stops[stops.length - 1][1]
 }
 
+// 错配色阶: 0=均衡(绿) → +缺口红 / −冗余蓝, v ∈ [-2, 2]
+export function mismatchRamp(v) {
+  const t = Math.max(-2, Math.min(2, v || 0)) / 2
+  if (t >= 0) return lerpColor('#66bd63', '#d73027', t)
+  return lerpColor('#66bd63', '#4575b4', -t)
+}
+
 // 网格图例生成 (分段色块)
 export function rampLegend(ramp, breaks, fmt) {
   const items = []
