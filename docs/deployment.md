@@ -178,7 +178,9 @@ cp .env.example .env
 nano .env        # 或 vim .env; 不填 key 也可, 对应功能自动降级
 
 # 3. 一键启动（首次自动构建镜像并恢复数据）
-docker compose up -d --build
+#    新版插件:  docker compose up -d --build
+#    旧版独立命令: docker-compose up -d --build   (v1, 兼容此 compose 文件)
+docker-compose up -d --build
 ```
 
 访问 **http://服务器IP:5000**。
