@@ -48,3 +48,8 @@ deploy/data/
 
 # Deployment package archive (build artifact)
 *部署包*.zip
+city-life-circle-deploy-*.zip
+
+# Docker 真实密钥 (模板 deploy/docker/.env.example 可提交)
+deploy/docker/.env
+deploy/docker/.env.local

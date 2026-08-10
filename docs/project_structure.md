@@ -1,7 +1,7 @@
 # 项目结构与文件说明
 
 用途：快速了解每个目录和文件的职责。
-配套阅读：docs/项目总结.md（设计）、docs/对话交接_20260802.md（进度）、docs/前端对接说明.md（API 契约）。
+配套阅读：docs/project_summary.md（设计）、docs/handoff_20260802.md（进度）、docs/frontend_api_guide.md（API 契约）。
 
 状态标记：[在用] 当前方案使用；[废弃] 已不用的历史脚本；[数据] 数据/导出文件；[工具] 校验与检查脚本。
 
@@ -120,12 +120,12 @@ city-life-circle/
 
 ## 四、docs/ —— 文档
 
-- 项目总结.md —— 总体设计：需求、技术栈、算法、评分、进度规划
-- 开发进度总结_20260801.md —— 开发进度快照
-- 对话交接_20260802.md —— 会话交接：完成事项/数据现状/下一步（新窗口先读这个）
-- 前端对接说明.md —— 前端 API 契约 + 坐标系提醒 + 页面建议
-- 项目结构与文件说明.md —— 本文档
-- 对话总结.md / 本次对话总结.md / 项目讨论总结.md —— 早期对话记录
+- project_summary.md —— 总体设计：需求、技术栈、算法、评分、进度规划
+- progress_20260801.md —— 开发进度快照
+- handoff_20260802.md —— 会话交接：完成事项/数据现状/下一步（新窗口先读这个）
+- frontend_api_guide.md —— 前端 API 契约 + 坐标系提醒 + 页面建议
+- project_structure.md —— 本文档
+- session_summary.md / session_notes_data.md / project_discussion.md —— 早期对话记录
 
 ---
 

@@ -12,7 +12,7 @@
 
 ## 快速开始（3 步）
 
-> 详细步骤见 [docs/部署说明.md](docs/部署说明.md)；完整介绍见 [docs/作品介绍与系统概述.md](docs/作品介绍与系统概述.md)。
+> 详细步骤见 [docs/deployment.md](docs/deployment.md)；完整介绍见 [docs/project_intro.md](docs/project_intro.md)。
 
 **前置**：PostgreSQL 13 + PostGIS 3.x + pgRouting 4.x、Python 3.9+。
 
@@ -58,10 +58,10 @@ python test_walk.py 31.861 117.285 30 --mode walk+metro+bus   # 命令行可达�
 
 | 文档 | 说明 |
 |---|---|
-| [docs/作品介绍与系统概述.md](docs/作品介绍与系统概述.md) | 功能、架构、算法创新、数据规模 |
-| [docs/部署说明.md](docs/部署说明.md) | 本地运行 + 云服务器部署（详细步骤） |
-| [docs/项目结构与文件说明.md](docs/项目结构与文件说明.md) | 目录/引擎/API/数据表说明 |
-| [docs/前端对接说明.md](docs/前端对接说明.md) | API 契约与坐标系说明 |
+| [docs/project_intro.md](docs/project_intro.md) | 功能、架构、算法创新、数据规模 |
+| [docs/deployment.md](docs/deployment.md) | 本地运行 + 云服务器部署（详细步骤） |
+| [docs/project_structure.md](docs/project_structure.md) | 目录/引擎/API/数据表说明 |
+| [docs/frontend_api_guide.md](docs/frontend_api_guide.md) | API 契约与坐标系说明 |
 
 ## 数据与版权
 
