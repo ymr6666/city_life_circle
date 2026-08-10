@@ -1,0 +1,105 @@
+城市时域生活圈分析系统 —— Windows 手动部署（不依赖 .bat 脚本）
+
+以下全部用命令行（CMD 或 PowerShell）手动执行，不调用任何 .bat 文件。
+需要先在项目根目录（解压后的部署包）下执行。
+
+------------------------------------------------------------
+第 0 步：安装软件
+------------------------------------------------------------
+
+1. PostgreSQL 12 至 16：安装 EDB 版，安装向导里勾选 Stack Builder，再勾选安装 PostGIS。
+2. pgRouting 4.x：从 GitHub Releases 下载与你 PostgreSQL 版本匹配的文件安装。
+3. Python 3.9 及以上。
+
+说明：PostgreSQL 安装后，它的命令（psql、createdb、pg_restore）在
+"C:\Program Files\PostgreSQL\16\bin" 目录下，通常不在 PATH 中。
+本指南默认该目录已在 PATH 中；若提示"不是内部或外部命令"，请先执行：
+
+  set PATH=%PATH%;C:\Program Files\PostgreSQL\16\bin
+
+（把 16 换成你实际的 PostgreSQL 版本号）
+
+------------------------------------------------------------
+第 1 步：设置数据库密码（在 CMD 中）
+------------------------------------------------------------
+
+  set PGPASSWORD=你的数据库密码
+
+如果不想在命令行明文写密码，也可以删除这一行，让下面的命令运行时
+交互提示你输入密码。
+
+------------------------------------------------------------
+第 2 步：创建数据库
+------------------------------------------------------------
+
+  createdb -U postgres -h localhost city_life_circle
+
+------------------------------------------------------------
+第 3 步：恢复数据
+------------------------------------------------------------
+
+  pg_restore -U postgres -h localhost -d city_life_circle --no-owner --no-privileges deploy\data\city_life_circle.dump
+
+如果报错提示 postgis / pgrouting 扩展不存在，先手动建扩展再恢复：
+
+  psql -U postgres -h localhost -d city_life_circle -c "CREATE EXTENSION IF NOT EXISTS postgis; CREATE EXTENSION IF NOT EXISTS pgrouting;"
+
+恢复完成后可验证：
+
+  psql -U postgres -h localhost -d city_life_circle -c "SELECT count(*) FROM hefei_roads;"
+
+正常应显示 104132。
+
+------------------------------------------------------------
+第 4 步：复制人口瓦片
+------------------------------------------------------------
+
+  robocopy deploy\data\pop_tiles cache\pop_tiles /E
+
+或使用 xcopy：
+
+  xcopy /E /I /Y deploy\data\pop_tiles cache\pop_tiles
+
+------------------------------------------------------------
+第 5 步：安装后端依赖
+------------------------------------------------------------
+
+  cd backend
+  python -m venv .venv
+  .venv\Scripts\activate
+  pip install -r requirements.txt
+
+若 pip 下载慢，可加清华源：
+
+  pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+------------------------------------------------------------
+第 6 步：启动系统
+------------------------------------------------------------
+
+  set CLC_DB_PASSWORD=你的数据库密码
+  python app.py
+
+看到类似 "waitress on http://0.0.0.0:5000" 的输出即启动成功。
+浏览器打开：
+
+  http://localhost:5000
+
+------------------------------------------------------------
+第 7 步：停止与卸载（可选）
+------------------------------------------------------------
+
+停止：回到运行窗口按 Ctrl+C。
+卸载：删除整个项目文件夹，并删除数据库：
+
+  dropdb -U postgres -h localhost city_life_circle
+
+------------------------------------------------------------
+常见问题
+------------------------------------------------------------
+
+1. 地址搜索用不了：高德 key 未配置（可选功能），不影响核心分析，用"在地图上点选位置"即可。
+2. 地图没有底图：无外网时属正常，会自动回退 OSM。
+3. 点"生成生活圈"报错：多半是数据库没恢复成功，重做第 2、3 步。
+4. 数据库密码不同：启动前用 set CLC_DB_PASSWORD=你的密码 覆盖即可，无需改代码。
+5. 前端无需构建：部署包已含构建产物，后端会自动托管页面。
