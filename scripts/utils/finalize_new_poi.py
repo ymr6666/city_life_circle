@@ -70,6 +70,18 @@ def main():
     cur = conn.cursor()
     phs = ','.join(['%s'] * len(cats))
 
+    # 快照"未备份的新行"id: 只有这些行需要 GCJ→WGS84 + 挂接。
+    # 已在 hefei_poi_gcj_backup 有备份的行视为已转换过, 绝不二次处理 (避免二次偏移)。
+    cur.execute(f"""
+        CREATE TEMP TABLE tmp_new_poi AS
+        SELECT p.id FROM hefei_poi p
+        WHERE p.category IN ({phs})
+          AND NOT EXISTS (SELECT 1 FROM hefei_poi_gcj_backup b WHERE b.id = p.id)
+    """, cats)
+    cur.execute("CREATE INDEX ON tmp_new_poi(id)")
+    print(f"待处理新行: {cur.rowcount} 条 (已有备份的行跳过, 防二次转换)")
+    conn.commit()
+
     print("=" * 60)
     print("Step 1: 备份新行 GCJ 值 -> hefei_poi_gcj_backup (仅补缺失)")
     print("=" * 60)
@@ -86,7 +98,7 @@ def main():
     print("=" * 60)
     print("Step 2: 转换 geometry GCJ -> WGS84")
     print("=" * 60)
-    cur.execute(f"SELECT id, ST_X(geometry), ST_Y(geometry) FROM hefei_poi WHERE category IN ({phs})", cats)
+    cur.execute(f"SELECT id, ST_X(geometry), ST_Y(geometry) FROM hefei_poi WHERE category IN ({phs}) AND EXISTS (SELECT 1 FROM tmp_new_poi n WHERE n.id = hefei_poi.id)", cats)
     rows = cur.fetchall()
     t0 = time.time()
     updates = [(gcj02_to_wgs84(lng, lat)[0], gcj02_to_wgs84(lng, lat)[1], pid) for pid, lng, lat in rows]
@@ -101,7 +113,7 @@ def main():
     print("=" * 60)
     print("Step 3: 转换 entr_location / exit_location")
     print("=" * 60)
-    cur.execute(f"SELECT id, entr_location, exit_location FROM hefei_poi WHERE category IN ({phs})", cats)
+    cur.execute(f"SELECT id, entr_location, exit_location FROM hefei_poi WHERE category IN ({phs}) AND EXISTS (SELECT 1 FROM tmp_new_poi n WHERE n.id = hefei_poi.id)", cats)
     entr_u, exit_u = [], []
     for pid, entr, exit_ in cur.fetchall():
         if entr:
@@ -175,6 +187,7 @@ def _snap(cur, conn, cats, phs):
                         ORDER BY ({snap_sql}) <-> geometry LIMIT {max_n * 3}
                     ) v
                     WHERE p.category = %s AND {bbox}
+                      AND EXISTS (SELECT 1 FROM tmp_new_poi n WHERE n.id = p.id)
                       AND NOT EXISTS (SELECT 1 FROM poi_road_nodes prn
                                       WHERE prn.poi_id = p.id AND prn.mode = %s)
                 ) t
@@ -193,6 +206,7 @@ def _snap(cur, conn, cats, phs):
             ) v
             WHERE p.category IN ({phs})
               AND p.geometry && ST_MakeEnvelope({BBOX[0]},{BBOX[1]},{BBOX[2]},{BBOX[3]}, 4326)
+              AND EXISTS (SELECT 1 FROM tmp_new_poi n WHERE n.id = p.id)
               AND NOT EXISTS (SELECT 1 FROM poi_road_nodes prn
                               WHERE prn.poi_id = p.id AND prn.mode = %s)
         """, (*cats, mode))
