@@ -38,7 +38,7 @@
 | npm | 8+ | 仅构建前端需要 |
 
 > **Windows** 建议安装 EDB 版 PostgreSQL 13（自带 Stack Builder，可勾选 PostGIS）；pgRouting 需手动安装
-> （可从 GitHub Releases 下载对应版本 `postgresql-13-pgrouting-4.0.1`，注意 32/64 位匹配）。
+> （可从 GitHub Releases 下载对应版本 `postgr esql-13-pgrouting-4.0.1`，注意 32/64 位匹配）。
 > **Linux** 建议 `apt install postgresql-13 postgresql-13-postgis-3 postgresql-13-pgrouting`（Ubuntu 20.04+ 自带 pgrouting 包）。
 
 ---

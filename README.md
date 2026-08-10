@@ -58,6 +58,7 @@ python test_walk.py 31.861 117.285 30 --mode walk+metro+bus   # 命令行可达�
 
 | 文档 | 说明 |
 |---|---|
+| [docs/judge_guide.md](docs/judge_guide.md) | **评委运行指南**：三步本地启动 + 两分钟演示路线 |
 | [docs/project_intro.md](docs/project_intro.md) | 功能、架构、算法创新、数据规模 |
 | [docs/deployment.md](docs/deployment.md) | 本地运行 + 云服务器部署（详细步骤） |
 | [docs/project_structure.md](docs/project_structure.md) | 目录/引擎/API/数据表说明 |
