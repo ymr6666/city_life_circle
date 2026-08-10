@@ -138,7 +138,7 @@ function detailRows(f) {
 .cat-card .name { flex: 1; font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cat-card .cnt { font-weight: 700; font-size: 14px; }
 .cat-card .caret { font-size: 10px; color: var(--text-3); }
-.fac-detail { border: 1px solid var(--border); border-radius: 8px; padding: 8px; max-height: 380px; display: flex; flex-direction: column; }
+.fac-detail { border: 1px solid var(--border); border-radius: 8px; padding: 8px; max-height: 560px; display: flex; flex-direction: column; }
 .detail-title { font-size: 12px; color: var(--text-2); margin-bottom: 8px; }
 .detail-hint { font-size: 11px; color: var(--text-3); margin-left: 6px; }
 .fac-list-scroll { overflow-y: auto; margin-top: 8px; }

@@ -779,7 +779,7 @@ onBeforeUnmount(() => {
 .tab { border: none; background: none; padding: 6px 12px; font-size: 13px; color: var(--text-2); border-bottom: 2px solid transparent; cursor: pointer; }
 .tab:hover { color: var(--primary); }
 .tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
-.tab-body { overflow-y: auto; max-height: 300px; }
+.tab-body { overflow-y: auto; max-height: calc(100vh - 340px); min-height: 200px; }
 
 .mode-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
 .mode-chip {
