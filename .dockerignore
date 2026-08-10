@@ -13,10 +13,10 @@ node_modules
 **/__pycache__
 **/*.pyc
 frontend/node_modules
-frontend/src
 frontend/vite.log
 frontend/.env
 frontend/.env.*
+frontend/dist
 *.dump
 *.gpkg
 *.shp

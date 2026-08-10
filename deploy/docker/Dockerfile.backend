@@ -1,15 +1,32 @@
-# 后端镜像: Python 3.11 + waitress, 内置前端构建产物, 同一进程托管 API + 页面
-FROM python:3.11-slim
+# 后端镜像 (多阶段): 阶段1用 Node 构建前端(可注入天地图key), 阶段2用 Python 托管 API+页面
+#
+# 构建参数:
+#   VITE_TIANDITU_KEY  天地图浏览器key (可选, 留空自动回退 OSM 底图)
+#   NPM_REGISTRY       npm 镜像源 (国内服务器可设 https://registry.npmmirror.com)
+# 环境变量(运行时):
+#   CLC_DB_*           数据库连接, AMAP_KEY 高德Web服务key
 
+# ---------- 阶段 1: 构建前端 ----------
+FROM node:20-alpine AS fe
+ARG VITE_TIANDITU_KEY=""
+ARG NPM_REGISTRY="https://registry.npmjs.org/"
+ENV VITE_TIANDITU_KEY=$VITE_TIANDITU_KEY
+WORKDIR /fe
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm config set registry "$NPM_REGISTRY" && npm ci
+COPY frontend/vite.config.js frontend/index.html ./
+COPY frontend/src/ src/
+RUN npm run build
+
+# ---------- 阶段 2: 后端 ----------
+FROM python:3.11-slim
 WORKDIR /app
 
-# 先装依赖 (利用层缓存)
 COPY backend/requirements.txt /app/backend/requirements.txt
 RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 
-# 后端源码 + 前端构建产物 (人口瓦片通过数据卷挂载, 见 docker-compose.yml)
 COPY backend/ /app/backend/
-COPY frontend/dist/ /app/frontend/dist/
+COPY --from=fe /fe/dist/ /app/frontend/dist/
 
 # 数据库连接默认走 compose 的 db 服务
 ENV CLC_DB_HOST=db \
