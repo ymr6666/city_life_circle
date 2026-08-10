@@ -103,7 +103,8 @@ class TransitLayer(TransportLayer):
         if missing:
             raise ValueError(
                 f"公交数据未就绪, 缺少表: {', '.join(missing)}。"
-                "请先完成: python crawl_bus.py --load 然后 python snap_bus_stops.py")
+                "请先完成: python download_hfbus_official.py && python crawl_8684.py"
+                " && python load_8684_bus.py 然后 python snap_bus_stops.py")
 
     # ── 边集 SQL ─────────────────────────────────────────────
     def _road_edge_sql(self, swap: bool = False) -> str:

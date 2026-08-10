@@ -4,7 +4,7 @@
 创建 bus_stop_road_nodes(stop_no, node_id, distance_m), 供 TransitLayer 的
 公交换乘边使用 (公交站节点 ↔ 路网节点 0 成本连接)。
 
-数据依赖: hefei_bus_stops 已由 `python crawl_bus.py --load` 落库
+数据依赖: hefei_bus_stops 已由 `python load_8684_bus.py` 落库
           (stop_no 为整数节点编号, 坐标为 WGS84)
 
 用法: python snap_bus_stops.py

@@ -3,7 +3,7 @@
 
 基于通用 TransitLayer: road_mode=walk, transit_modes=('bus',)
 数据依赖: hefei_bus_stops / hefei_bus_line_stops / bus_stop_road_nodes
-          (前两者由 crawl_bus.py --load 生成, 后者由 snap_bus_stops.py 生成)
+          (前两者由 load_8684_bus.py 生成, 后者由 snap_bus_stops.py 生成)
 数据未就绪时 compute_reachability 会抛出 ValueError 给出明确提示。
 """
 from .transit_layer import TransitLayer
