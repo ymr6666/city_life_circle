@@ -67,6 +67,9 @@ onMounted(() => {
     'OSM 标准': osm,
   }, null, { position: 'bottomright' }).addTo(map)
 
+  // 比例尺 (公制, 随缩放自动更新)
+  L.control.scale({ position: 'bottomleft', imperial: false, maxWidth: 160 }).addTo(map)
+
   // 人口密度开关按钮 (常驻地图左下, 与人口页共用 togglePopLayer 保持状态一致)
   const popBtnEl = ref(null)
   const PopToggle = L.Control.extend({
