@@ -195,8 +195,8 @@ export function stackedBarOption({ title, items }) {
   return {
     tooltip: { ...baseTooltip, trigger: 'axis', valueFormatter: (v) => Number(v || 0).toLocaleString() },
     title: title ? { text: title, left: 'center', top: 0, textStyle: { fontSize: 13, color: '#263238', fontWeight: 600 } } : undefined,
-    legend: { top: 0, textStyle: { color: AXIS_COLOR, fontSize: 11 } },
-    grid: baseGrid({ top: title ? 40 : 30 }),
+    legend: { top: title ? 24 : 0, textStyle: { color: AXIS_COLOR, fontSize: 11 } },
+    grid: baseGrid({ top: title ? 46 : 30 }),
     xAxis: baseXAxis(items.map((i) => i.name)),
     yAxis: baseYAxis(),
     series: [
