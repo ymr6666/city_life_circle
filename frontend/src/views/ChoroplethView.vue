@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { api } from '../api'
 import { store } from '../store'
@@ -251,7 +251,7 @@ onMounted(updateLegend)
 .legend { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; }
 .hint { color: var(--text-3); font-size: 11.5px; line-height: 1.6; }
 #status {
-  position: fixed; left: 12px; bottom: 12px; z-index: 2000;
+  position: fixed; left: 120px; bottom: 12px; z-index: 2000;
   background: rgba(38, 50, 56, .82); color: #fff; padding: 5px 12px;
   border-radius: 6px; font-size: 12px; max-width: 55%;
 }

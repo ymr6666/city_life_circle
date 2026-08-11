@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { api } from '../api'
 import { store } from '../store'
@@ -827,7 +827,7 @@ onBeforeUnmount(() => {
 .cp-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 3px; }
 
 #status {
-  position: fixed; left: 12px; bottom: 12px; z-index: 2000;
+  position: fixed; left: 120px; bottom: 12px; z-index: 2000;
   background: rgba(38, 50, 56, .82); color: #fff; padding: 5px 12px;
   border-radius: 6px; font-size: 12px; max-width: 55%; transition: opacity .3s;
 }

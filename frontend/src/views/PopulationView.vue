@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import L from 'leaflet'
 import { store, togglePopLayer } from '../store'
@@ -440,7 +440,7 @@ updateLegend()
 .legend { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-top: 10px; }
 .hint { color: var(--text-3); font-size: 11.5px; line-height: 1.7; }
 #status {
-  position: fixed; left: 12px; bottom: 12px; z-index: 2000;
+  position: fixed; left: 120px; bottom: 12px; z-index: 2000;
   background: rgba(38, 50, 56, .82); color: #fff; padding: 5px 12px;
   border-radius: 6px; font-size: 12px; max-width: 55%;
 }

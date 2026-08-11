@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { ref, watch, computed, onBeforeUnmount } from 'vue'
 import L from 'leaflet'
 import { api } from '../api'
@@ -766,7 +766,7 @@ const schemeCompareComputed = computed(() => {
 .r-meta { font-size: 11px; color: var(--text-2); }
 .r-score { font-size: 15px; font-weight: 700; color: var(--primary); flex-shrink: 0; }
 #status {
-  position: fixed; left: 12px; bottom: 12px; z-index: 2000;
+  position: fixed; left: 120px; bottom: 12px; z-index: 2000;
   background: rgba(38, 50, 56, .82); color: #fff; padding: 5px 12px;
   border-radius: 6px; font-size: 12px; max-width: 60%;
 }

@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { ref, watch, onMounted, onBeforeUnmount, computed } from 'vue'
 import L from 'leaflet'
 import { api } from '../api'
@@ -589,7 +589,7 @@ function fmtN(v) { return (v || 0).toLocaleString() }
 .b-card b.warn { color: #d32f2f; }
 .hint { color: var(--text-3); font-size: 11.5px; line-height: 1.6; }
 #status {
-  position: fixed; left: 12px; bottom: 12px; z-index: 2000;
+  position: fixed; left: 120px; bottom: 12px; z-index: 2000;
   background: rgba(38, 50, 56, .82); color: #fff; padding: 5px 12px;
   border-radius: 6px; font-size: 12px; max-width: 55%;
 }
