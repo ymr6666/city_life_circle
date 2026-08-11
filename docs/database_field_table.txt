@@ -1,0 +1,202 @@
+城市时域生活圈分析系统 —— 数据库字段表
+
+说明：字段名 | 类型 | 是否可空 | 说明。选中文本后在 Word 中执行
+"插入 → 表格 → 文本转换成表格"，分隔符选"其他|"，即可一键转为表格。
+所有几何字段均为 WGS84 坐标系。
+
+一、业务表
+------------------------------------------------------------
+
+【表 1】hefei_roads 道路路网（104,132 行）
+字段名 | 类型 | 可空 | 说明
+id | integer | 否 | 自增主键
+u | bigint | 是 | 边起点 OSM 节点号
+v | bigint | 是 | 边终点 OSM 节点号
+key | bigint | 是 | OSM 边键
+osmid | text | 是 | OSM 道路 ID
+highway | text | 是 | 道路等级（motorway/trunk/primary/secondary/tertiary/residential/service/footway 等）
+name | text | 是 | 道路名称
+lanes | text | 是 | 车道数
+oneway | text | 是 | 单行道标记
+ref | text | 是 | 道路编号（如 G312）
+reversed | text | 是 | 边是否反向（osmnx 导入标记）
+length | double | 是 | 路段长度（米）
+maxspeed | text | 是 | 限速
+bridge | text | 是 | 桥梁标记
+tunnel | text | 是 | 隧道标记
+access | text | 是 | 通行权限（private 等）
+service | text | 是 | 服务道路类型
+width | text | 是 | 路面宽度
+junction | text | 是 | 路口类型
+landuse | text | 是 | 沿线土地利用
+layer | text | 是 | 道路层级
+foot | text | 是 | 步行通行 tag
+bicycle | text | 是 | 骑行通行 tag
+motor_vehicle | text | 是 | 机动车通行 tag
+vehicle | text | 是 | 车辆通行 tag
+sidewalk | text | 是 | 人行道
+cycleway | text | 是 | 自行车道
+surface | text | 是 | 路面材质
+smoothness | text | 是 | 平整度
+lit | text | 是 | 照明
+segregated | text | 是 | 人非分隔
+oneway_bicycle | text | 是 | 自行车单行
+incline | text | 是 | 坡度
+bridge_class | text | 是 | 桥隧四档：none/bridge/elevated/tunnel/footbridge
+walk_ok | boolean | 是 | 步行可达标志
+cycle_ok | boolean | 是 | 骑行可达标志
+drive_ok | boolean | 是 | 驾车可达标志
+source | integer | 是 | 拓扑起点节点（pgRouting）
+target | integer | 是 | 拓扑终点节点（pgRouting）
+cost | double | 是 | 正向通行成本（米）
+reverse_cost | double | 是 | 反向通行成本（米）
+geometry | geometry | 是 | LineString（WGS84）
+
+【表 2】hefei_roads_vertices_pgr 路网拓扑顶点（42,785 行）
+字段名 | 类型 | 可空 | 说明
+id | bigint | 否 | 自增主键（节点编号，路径计算引用）
+osm_id | bigint | 是 | 对应 OSM 节点 ID
+x | double | 是 | 纬度（注意：与常规相反，x=纬度）
+y | double | 是 | 经度（注意：与常规相反，y=经度）
+geometry | geometry | 是 | Point（WGS84）
+
+【表 3】hefei_poi 设施兴趣点（22,080 行，21 类）
+字段名 | 类型 | 可空 | 说明
+id | integer | 否 | 自增主键
+name | text | 是 | 设施名称
+category | text | 是 | 类别（hospital/supermarket/school_primary/bank/government 等 21 类）
+sub_category | text | 是 | 高德类型编码（如 090100 综合医院、160100 银行、130106 社区）
+address | text | 是 | 地址
+tel | text | 是 | 联系电话
+business_area | text | 是 | 商圈
+rating | text | 是 | 评分
+cost | text | 是 | 人均消费
+parking_type | text | 是 | 停车类型
+opentime_today | text | 是 | 今日营业时间
+opentime_week | text | 是 | 周营业时间
+tag | text | 是 | 标签
+alias | text | 是 | 别名
+entr_location | text | 是 | 入口引导点坐标"lng,lat"（WGS84）
+exit_location | text | 是 | 出口引导点坐标"lng,lat"（WGS84）
+navi_poiid | text | 是 | 导航 POI ID
+photos | text | 是 | 照片信息
+canonical_poi_id | integer | 是 | 旧版多楼栋分组代表（已由 facility_id 取代）
+facility_id | integer | 是 | 展示分组 ID（同一物理设施多部门合并）
+facility_name | text | 是 | 展示分组名称
+geometry | geometry | 是 | Point（WGS84）
+
+【表 4】hefei_metro_stations 地铁站（169 行）
+字段名 | 类型 | 可空 | 说明
+id | integer | 否 | 自增主键
+name | text | 是 | 站名
+line_name | text | 是 | 所属线路（"1|2"表示换乘站）
+is_transfer | boolean | 是 | 是否换乘站
+sequence | integer | 是 | 线路内站序
+geometry | geometry | 是 | Point（WGS84）
+
+【表 5】hefei_metro_edges 地铁轨道边（183 行）
+字段名 | 类型 | 可空 | 说明
+id | integer | 否 | 自增主键
+line_name | text | 是 | 所属线路
+station_from | integer | 是 | 起始站（关联 hefei_metro_stations.id）
+station_to | integer | 是 | 终点站
+distance_km | double | 是 | 站间距离（公里）
+time_min | double | 是 | 站间运行时间（分钟）
+geometry | geometry | 是 | LineString（WGS84）
+
+【表 6】hefei_bus_stops 公交站（5,530 行）
+字段名 | 类型 | 可空 | 说明
+id | text | 否 | 官方站点 ID
+stop_no | bigint | 否 | 站点编号（图节点整数号，公交偏移 20 万）
+name | text | 是 | 站名
+adcode | text | 是 | 行政区划代码
+lng | double | 是 | 经度（WGS84）
+lat | double | 是 | 纬度（WGS84）
+geometry | geometry | 是 | Point（WGS84）
+
+【表 7】hefei_bus_lines 公交线路（227 行）
+字段名 | 类型 | 可空 | 说明
+id | text | 否 | 线路代码
+name | text | 是 | 线路名称（如 合肥46路）
+type | text | 是 | 线路类型/等级
+start_stop | text | 是 | 首站名
+end_stop | text | 是 | 末站名
+distance_km | double | 是 | 线路里程（公里）
+start_time | text | 是 | 首班时间
+end_time | text | 是 | 末班时间
+direc_id | text | 是 | 方向标识
+loop_flag | boolean | 是 | 是否环线
+company | text | 是 | 运营公司
+geometry | geometry | 是 | LineString（WGS84）
+
+【表 8】hefei_bus_line_stops 公交线路站序（8,489 行）
+字段名 | 类型 | 可空 | 说明
+line_id | text | 否 | 线路代码（关联 hefei_bus_lines.id）
+stop_id | text | 否 | 站点 ID（关联 hefei_bus_stops.id）
+sequence | integer | 是 | 站序（0 起）
+route_pos_m | double | 是 | 沿线里程（米，公交时间成本依据）
+direction | text | 否 | 方向（up/down）
+
+【表 9】hefei_pop_grid 100 米人口格点（169,877 行）
+字段名 | 类型 | 可空 | 说明
+id | bigint | 否 | 自增主键
+population | integer | 是 | 格点人口
+geometry | geometry | 是 | Point（WGS84）
+
+二、挂接表
+------------------------------------------------------------
+
+【表 10】poi_road_nodes 设施-路网挂接（119,368 行）
+字段名 | 类型 | 可空 | 说明
+id | integer | 否 | 自增主键
+poi_id | integer | 是 | 设施 ID（关联 hefei_poi.id）
+node_id | integer | 是 | 路网顶点 ID（关联 hefei_roads_vertices_pgr.id）
+mode | text | 是 | 挂接模式（walk/drive）
+distance_m | double | 是 | 设施到节点距离（米）
+
+【表 11】metro_station_road_nodes 地铁站-路网挂接（436 行）
+字段名 | 类型 | 可空 | 说明
+id | integer | 否 | 自增主键
+station_id | integer | 是 | 地铁站 ID（关联 hefei_metro_stations.id）
+node_id | integer | 是 | 路网顶点 ID
+distance_m | double | 是 | 挂接距离（米）
+
+【表 12】bus_stop_road_nodes 公交站-路网挂接（14,013 行）
+字段名 | 类型 | 可空 | 说明
+id | integer | 否 | 自增主键
+stop_no | bigint | 是 | 站点编号（关联 hefei_bus_stops.stop_no）
+node_id | integer | 是 | 路网顶点 ID
+distance_m | double | 是 | 挂接距离（米）
+
+【表 13】hefei_pop_nearest 人口格-路网挂接（169,877 行）
+字段名 | 类型 | 可空 | 说明
+id | bigint | 否 | 自增主键
+pop_id | bigint | 是 | 人口格 ID（关联 hefei_pop_grid.id）
+node_id | integer | 是 | 最近步行路网顶点 ID
+distance_m | double | 是 | 挂接距离（米，超过阈值视为路网外）
+
+【表 14】hefei_residential_nearest 住宅小区-路网挂接（2,546 行）
+字段名 | 类型 | 可空 | 说明
+id | bigint | 否 | 自增主键
+poi_id | integer | 是 | 小区 POI ID（关联 hefei_poi.id）
+node_id | integer | 是 | 最近步行路网顶点 ID
+distance_m | double | 是 | 挂接距离（米）
+
+三、派生/辅助表
+------------------------------------------------------------
+
+【表 15】road_node_modes 顶点可达模式缓存（116,088 行）
+字段名 | 类型 | 可空 | 说明
+node_id | integer | 否 | 路网顶点 ID
+mode | text | 否 | 可达模式（walk/cycle/drive）
+
+【表 16】hefei_poi_gcj_backup 设施原始坐标备份（21,730 行）
+字段名 | 类型 | 可空 | 说明
+id | integer | 是 | 设施 ID（关联 hefei_poi.id）
+geometry | geometry | 是 | 原始 GCJ-02 坐标
+entr_location | text | 是 | 原始入口引导点
+exit_location | text | 是 | 原始出口引导点
+
+------------------------------------------------------------
+注：另有 hefei_nodes（OSM 原始节点，仅供核验）与系统表 spatial_ref_sys（PostGIS 自带）。
+以上字段以数据库实际结构为准，坐标为 WGS84。
