@@ -239,6 +239,22 @@ WantedBy=multi-user.target
 systemctl daemon-reload && systemctl enable --now city-life-circle
 ```
 
+**服务的启动与停止（日常运维）：**
+
+```bash
+sudo systemctl stop city-life-circle      # 停止网站（前后端同进程，停此服务即下线）
+sudo systemctl start city-life-circle     # 启动网站
+sudo systemctl restart city-life-circle   # 重启（更新代码/修改配置后执行）
+sudo systemctl status city-life-circle    # 查看状态（active (running) 为在运行）
+sudo systemctl disable city-life-circle   # 停止开机自启（重启服务器后网站不再自动恢复）
+sudo systemctl enable city-life-circle    # 恢复开机自启
+journalctl -u city-life-circle -f         # 实时查看运行日志（排查问题用）
+```
+
+> 说明：停止 `city-life-circle` 仅停掉进程，数据库与文件均不受影响，再次 `start` 即恢复上线。
+> 若按下方配置部署了 Nginx，Nginx 只做反向代理，前端页面由后端直接托管时无需额外操作；
+> 如需连同入口一起下线，再执行 `sudo systemctl stop nginx` 即可。
+
 `/etc/nginx/sites-available/city-life-circle`：
 
 ```nginx
